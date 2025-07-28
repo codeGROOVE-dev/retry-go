@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/avast/retry-go/v4"
+	"github.com/codeGROOVE-dev/retry-go"
 	"github.com/stretchr/testify/assert"
 )
 

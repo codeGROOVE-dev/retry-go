@@ -1,12 +1,22 @@
 # retry
 
-[![Release](https://img.shields.io/github/release/avast/retry-go.svg?style=flat-square)](https://github.com/avast/retry-go/releases/latest)
+[![Release](https://img.shields.io/github/release/codeGROOVE-dev/retry-go.svg?style=flat-square)](https://github.com/codeGROOVE-dev/retry-go/releases/latest)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
-![GitHub Actions](https://github.com/avast/retry-go/actions/workflows/workflow.yaml/badge.svg)
-[![Go Report Card](https://goreportcard.com/badge/github.com/avast/retry-go?style=flat-square)](https://goreportcard.com/report/github.com/avast/retry-go)
-[![Go Reference](https://pkg.go.dev/badge/github.com/avast/retry-go/v4.svg)](https://pkg.go.dev/github.com/avast/retry-go/v4)
-[![codecov.io](https://codecov.io/github/avast/retry-go/coverage.svg?branch=master)](https://codecov.io/github/avast/retry-go?branch=master)
-[![Sourcegraph](https://sourcegraph.com/github.com/avast/retry-go/-/badge.svg)](https://sourcegraph.com/github.com/avast/retry-go?badge)
+![GitHub Actions](https://github.com/codeGROOVE-dev/retry-go/actions/workflows/workflow.yaml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/retry-go?style=flat-square)](https://goreportcard.com/report/github.com/codeGROOVE-dev/retry-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/codeGROOVE-dev/retry-go.svg)](https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go)
+
+## Fork Information
+
+This is an actively maintained fork of [avast/retry-go](https://github.com/avast/retry-go), focused on reliability and simplicity. We extend our gratitude to the original authors and contributors at Avast for creating this excellent library.
+
+**Key improvements in this fork:**
+- Enhanced reliability and edge case handling
+- Simplified API design
+- Active maintenance and bug fixes
+- Focus on production-grade stability
+
+**Original Project:** [github.com/avast/retry-go](https://github.com/avast/retry-go)
 
 Simple library for retry mechanism
 
@@ -67,7 +77,7 @@ HTTP GET with retry with data:
 
     fmt.Println(string(body))
 
-[More examples](https://github.com/avast/retry-go/tree/master/examples)
+[More examples](https://github.com/codeGROOVE-dev/retry-go/tree/master/examples)
 
 # SEE ALSO
 
@@ -91,7 +101,7 @@ nonintuitive interface (for me)
 
 * 4.0.0
 
-    - infinity retry is possible by set `Attempts(0)` by PR [#49](https://github.com/avast/retry-go/pull/49)
+    - infinity retry is possible by set `Attempts(0)` by PR [#49](https://github.com/avast/retry-go/pull/49) (original project)
 
 * 3.0.0
 
@@ -101,7 +111,7 @@ nonintuitive interface (for me)
 
     - argument of `retry.Delay` is final delay (no multiplication by `retry.Units` anymore)
     - function `retry.Units` are removed
-    - [more about this breaking change](https://github.com/avast/retry-go/issues/7)
+    - [more about this breaking change](https://github.com/avast/retry-go/issues/7) (original project)
 
 * 0.3.0 -> 1.0.0
 
