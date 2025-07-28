@@ -294,9 +294,16 @@ func TestUnrecoverableError(t *testing.T) {
 		},
 		Attempts(2),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, Unrecoverable(testErr), err)
-	assert.Equal(t, 1, attempts, "unrecoverable error broke the loop")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	expectedErr := Unrecoverable(testErr)
+	if err.Error() != expectedErr.Error() {
+		t.Errorf("error: got %v, want %v", err, expectedErr)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts with unrecoverable error: got %d, want 1", attempts)
+	}
 }
 
 func TestCombineFixedDelays(t *testing.T) {
