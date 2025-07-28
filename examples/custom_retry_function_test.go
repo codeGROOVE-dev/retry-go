@@ -9,9 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeGROOVE-dev/retry-go"
-	"github.com/stretchr/testify/assert"
-)
+	"github.com/codeGROOVE-dev/retry-go")
 
 // RetriableError is a custom error that contains a positive duration for the next retry
 type RetriableError struct {
@@ -91,7 +89,10 @@ func TestCustomRetryFunction(t *testing.T) {
 	)
 
 	fmt.Println("Server responds with: " + string(body))
-
-	assert.NoError(t, err)
-	assert.Equal(t, "hello", string(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(body) != "hello" {
+		t.Errorf("expected %v, got %v", "hello", string(body))
+	}
 }
