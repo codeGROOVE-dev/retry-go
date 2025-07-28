@@ -175,8 +175,8 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		attemptsForError[err] = attempts
 	}
 
-	shouldRetry := true
-	for shouldRetry {
+shouldRetry:
+	for {
 		t, err := retryableFunc()
 		if err == nil {
 			return t, nil
@@ -192,13 +192,15 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 			if errors.Is(err, errToCheck) {
 				attempts--
 				attemptsForError[errToCheck] = attempts
-				shouldRetry = shouldRetry && attempts > 0
+				if attempts <= 0 {
+					break shouldRetry
+				}
 			}
 		}
 
 		// if this is last attempt - don't wait
 		if n == config.attempts-1 {
-			break
+			break shouldRetry
 		}
 
 		config.onRetry(n, err)
@@ -213,8 +215,6 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 
 			return emptyT, append(errorLog, context.Cause(config.context))
 		}
-
-		shouldRetry = shouldRetry && n < config.attempts
 	}
 
 	if config.lastErrorOnly {
