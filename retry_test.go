@@ -632,6 +632,52 @@ func BenchmarkDoWithDataNoErrors(b *testing.B) {
 	}
 }
 
+type attemptsForErrorTestError struct{}
+
+func (attemptsForErrorTestError) Error() string { return "test error" }
+
+func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
+	var count uint64
+	var timestamps []time.Time
+	
+	startTime := time.Now()
+	
+	err := Do(
+		func() error {
+			count++
+			timestamps = append(timestamps, time.Now())
+			return attemptsForErrorTestError{}
+		},
+		Attempts(3),
+		Delay(200*time.Millisecond),
+		DelayType(FixedDelay),
+		AttemptsForError(2, attemptsForErrorTestError{}),
+		LastErrorOnly(true),
+		Context(context.Background()),
+	)
+	
+	endTime := time.Now()
+	
+	assert.Error(t, err)
+	assert.Equal(t, uint64(2), count, "should attempt exactly 2 times")
+	assert.Len(t, timestamps, 2, "should have 2 timestamps")
+	
+	// Verify timing: first attempt at ~0ms, second at ~200ms, end immediately after second attempt
+	firstAttemptTime := timestamps[0].Sub(startTime)
+	secondAttemptTime := timestamps[1].Sub(startTime)
+	totalTime := endTime.Sub(startTime)
+	
+	// First attempt should be immediate
+	assert.Less(t, firstAttemptTime, 50*time.Millisecond, "first attempt should be immediate")
+	
+	// Second attempt should be after delay
+	assert.Greater(t, secondAttemptTime, 150*time.Millisecond, "second attempt should be after delay")
+	assert.Less(t, secondAttemptTime, 250*time.Millisecond, "second attempt should not be too delayed")
+	
+	// Total time should not include delay after final attempt
+	assert.Less(t, totalTime, 300*time.Millisecond, "should not delay after final attempt")
+}
+
 func TestIsRecoverable(t *testing.T) {
 	err := errors.New("err")
 	assert.True(t, IsRecoverable(err))
