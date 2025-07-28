@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeGROOVE-dev/retry-go")
+	"github.com/codeGROOVE-dev/retry-go"
+)
 
 type RetryAfterError struct {
 	response http.Response

@@ -26,7 +26,7 @@ func TestDoWithDataAllFailed(t *testing.T) {
 		t.Errorf("returned value: got %d, want 0", v)
 	}
 
-	expectedErrorFormat := `All attempts fail:
+	expectedErrorFormat := `retry: all attempts failed:
 #1: test
 #2: test
 #3: test
@@ -106,7 +106,7 @@ func TestRetryIf(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	expectedErrorFormat := `All attempts fail:
+	expectedErrorFormat := `retry: all attempts failed:
 #1: test
 #2: test
 #3: special`
@@ -382,35 +382,30 @@ func TestBackOffDelay(t *testing.T) {
 	for _, c := range []struct {
 		label         string
 		delay         time.Duration
-		expectedMaxN  uint
 		n             uint
 		expectedDelay time.Duration
 	}{
 		{
 			label:         "negative-delay",
 			delay:         -1,
-			expectedMaxN:  62,
 			n:             2,
 			expectedDelay: 2,
 		},
 		{
 			label:         "zero-delay",
 			delay:         0,
-			expectedMaxN:  62,
 			n:             65,
 			expectedDelay: 1 << 62,
 		},
 		{
 			label:         "one-second",
 			delay:         time.Second,
-			expectedMaxN:  33,
 			n:             62,
-			expectedDelay: time.Second << 33,
+			expectedDelay: time.Duration(math.MaxInt64),
 		},
 		{
 			label:         "one-second-n",
 			delay:         time.Second,
-			expectedMaxN:  33,
 			n:             1,
 			expectedDelay: time.Second,
 		},
@@ -422,9 +417,6 @@ func TestBackOffDelay(t *testing.T) {
 					delay: c.delay,
 				}
 				delay := BackOffDelay(c.n, nil, &config)
-				if config.maxBackOffN != c.expectedMaxN {
-					t.Errorf("max n: got %v, want %v", config.maxBackOffN, c.expectedMaxN)
-				}
 				if delay != c.expectedDelay {
 					t.Errorf("delay duration: got %v, want %v", delay, c.expectedDelay)
 				}
@@ -532,7 +524,7 @@ func TestContext(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 
-		expectedErrorFormat := `All attempts fail:
+		expectedErrorFormat := `retry: all attempts failed:
 #1: test
 #2: test
 #3: context canceled`
@@ -656,7 +648,7 @@ func TestTimerInterface(t *testing.T) {
 	timer := &testTimer{}
 	attempts := 0
 	err := Do(
-		func() error { 
+		func() error {
 			attempts++
 			if attempts < 2 {
 				return errors.New("test")
@@ -672,7 +664,7 @@ func TestTimerInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if !timer.called {
 		t.Error("expected timer.After to be called")
 	}
@@ -912,14 +904,14 @@ func TestPanicRecovery(t *testing.T) {
 				t.Error("expected panic to propagate, but it was swallowed")
 			}
 		}()
-		
+
 		err := Do(func() error {
 			panic("test panic")
 		})
 		// Should not reach here
 		t.Errorf("expected panic, got error: %v", err)
 	})
-	
+
 	t.Run("panic in OnRetry callback", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -928,7 +920,7 @@ func TestPanicRecovery(t *testing.T) {
 				t.Error("expected panic to propagate from OnRetry")
 			}
 		}()
-		
+
 		err := Do(
 			func() error { return errors.New("test") },
 			OnRetry(func(n uint, err error) {
@@ -938,7 +930,7 @@ func TestPanicRecovery(t *testing.T) {
 		)
 		t.Errorf("expected panic, got error: %v", err)
 	})
-	
+
 	t.Run("panic in DelayType function", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -947,7 +939,7 @@ func TestPanicRecovery(t *testing.T) {
 				t.Error("expected panic to propagate from DelayType")
 			}
 		}()
-		
+
 		err := Do(
 			func() error { return errors.New("test") },
 			DelayType(func(n uint, err error, config *Config) time.Duration {
@@ -962,12 +954,12 @@ func TestPanicRecovery(t *testing.T) {
 func TestContextWithCustomCause(t *testing.T) {
 	customErr := errors.New("custom cancellation reason")
 	ctx, cancel := context.WithCancelCause(context.Background())
-	
+
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel(customErr)
 	}()
-	
+
 	err := Do(
 		func() error {
 			time.Sleep(100 * time.Millisecond)
@@ -976,7 +968,7 @@ func TestContextWithCustomCause(t *testing.T) {
 		Context(ctx),
 		Attempts(5),
 	)
-	
+
 	if !errors.Is(err, customErr) {
 		t.Errorf("expected custom cancellation cause in error chain, got: %v", err)
 	}
@@ -986,12 +978,12 @@ func TestConcurrentRetryUsage(t *testing.T) {
 	// Test that retry is safe for concurrent use
 	var wg sync.WaitGroup
 	goroutines := 20 // Reduced from 100 for faster tests
-	
+
 	for i := 0; i < goroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			count := 0
 			err := Do(
 				func() error {
@@ -1004,7 +996,7 @@ func TestConcurrentRetryUsage(t *testing.T) {
 				Attempts(5),
 				Delay(0), // No delay for speed
 			)
-			
+
 			if err != nil {
 				t.Errorf("goroutine %d: unexpected error: %v", id, err)
 			}
@@ -1013,7 +1005,7 @@ func TestConcurrentRetryUsage(t *testing.T) {
 			}
 		}(i)
 	}
-	
+
 	wg.Wait()
 }
 
@@ -1029,7 +1021,7 @@ func TestDoWithDataGenericEdgeCases(t *testing.T) {
 			t.Errorf("expected nil result, got: %v", result)
 		}
 	})
-	
+
 	t.Run("interface{} return type", func(t *testing.T) {
 		expected := map[string]interface{}{
 			"key": "value",
@@ -1045,11 +1037,11 @@ func TestDoWithDataGenericEdgeCases(t *testing.T) {
 			t.Errorf("result: got %v, want %v", result, expected)
 		}
 	})
-	
+
 	t.Run("channel type", func(t *testing.T) {
 		ch := make(chan int, 1)
 		ch <- 42
-		
+
 		result, err := DoWithData(func() (chan int, error) {
 			return ch, nil
 		})
@@ -1060,10 +1052,10 @@ func TestDoWithDataGenericEdgeCases(t *testing.T) {
 			t.Errorf("expected same channel, got different channel")
 		}
 	})
-	
+
 	t.Run("function type", func(t *testing.T) {
 		fn := func(x int) int { return x * 2 }
-		
+
 		result, err := DoWithData(func() (func(int) int, error) {
 			return fn, nil
 		})
@@ -1080,10 +1072,10 @@ func TestDoWithDataGenericEdgeCases(t *testing.T) {
 func TestVeryLargeDelayOverflow(t *testing.T) {
 	// Test with delays near MaxInt64
 	largeDelay := time.Duration(math.MaxInt64) - time.Hour
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	err := Do(
 		func() error { return errors.New("test") },
 		Context(ctx),
@@ -1094,7 +1086,7 @@ func TestVeryLargeDelayOverflow(t *testing.T) {
 			return config.delay + time.Hour
 		}),
 	)
-	
+
 	// Should timeout, not panic or hang
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected deadline exceeded, got: %v", err)
@@ -1104,19 +1096,19 @@ func TestVeryLargeDelayOverflow(t *testing.T) {
 func TestErrorAccumulationAtCapacity(t *testing.T) {
 	// Test that error accumulation is capped to prevent unbounded memory growth
 	// We verify the error slice capacity is pre-allocated and capped correctly
-	
+
 	testCases := []struct {
-		name            string
-		attempts        uint
-		expectedCap     int
-		expectedLen     int
+		name        string
+		attempts    uint
+		expectedCap int
+		expectedLen int
 	}{
 		{"small attempts", 10, 10, 10},
 		{"medium attempts", 100, 100, 100},
 		{"at cap", 1000, 1000, 1000},
 		{"over cap", 1500, 1000, 50}, // Run only 50 attempts to avoid timeout
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			attempts := 0
@@ -1133,7 +1125,7 @@ func TestErrorAccumulationAtCapacity(t *testing.T) {
 				Delay(0),
 				DelayType(FixedDelay),
 			)
-			
+
 			// Should have succeeded on large tests
 			if tc.attempts >= 1000 && err != nil {
 				if errList, ok := err.(Error); ok {
@@ -1163,7 +1155,7 @@ func TestRetryIfWithChangingConditions(t *testing.T) {
 	// Test RetryIf function that changes behavior based on external state
 	var shouldRetry bool = true
 	attempts := 0
-	
+
 	err := Do(
 		func() error {
 			attempts++
@@ -1178,14 +1170,14 @@ func TestRetryIfWithChangingConditions(t *testing.T) {
 		Attempts(10),
 		Delay(time.Millisecond),
 	)
-	
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	
+
 	// Should stop at attempt 3
 	// Attempt 1: error, shouldRetry=true, retryIf returns true → continue
-	// Attempt 2: error, shouldRetry=true, retryIf returns true → continue  
+	// Attempt 2: error, shouldRetry=true, retryIf returns true → continue
 	// Attempt 3: sets shouldRetry=false, error, retryIf returns false → stop
 	if attempts != 3 {
 		t.Errorf("expected 3 attempts, got %d", attempts)
@@ -1196,13 +1188,13 @@ func TestCustomTimerEdgeCases(t *testing.T) {
 	t.Run("timer returns closed channel", func(t *testing.T) {
 		closedCh := make(chan time.Time)
 		close(closedCh)
-		
+
 		timer := &testTimer{
 			afterFunc: func(d time.Duration) <-chan time.Time {
 				return closedCh
 			},
 		}
-		
+
 		attempts := 0
 		err := Do(
 			func() error {
@@ -1215,7 +1207,7 @@ func TestCustomTimerEdgeCases(t *testing.T) {
 			WithTimer(timer),
 			Attempts(5),
 		)
-		
+
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -1232,7 +1224,7 @@ func TestComplexErrorChains(t *testing.T) {
 	wrappedTwice := fmt.Errorf("wrapped twice: %w", wrappedOnce)
 	customErr := &fooErr{str: "custom error"}
 	wrappedCustom := fmt.Errorf("wrapped custom: %w", customErr)
-	
+
 	attempts := 0
 	err := Do(
 		func() error {
@@ -1250,21 +1242,21 @@ func TestComplexErrorChains(t *testing.T) {
 		},
 		Attempts(5),
 	)
-	
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	
+
 	// Verify error chain contains all expected errors
 	if !errors.Is(err, baseErr) {
 		t.Error("error chain should contain base error")
 	}
-	
+
 	// Check if err contains fooErr
 	// The second attempt returns wrappedCustom which contains &fooErr
 	var fe fooErr
 	found := false
-	
+
 	// Check if we can find it directly
 	if errors.As(err, &fe) {
 		found = true
@@ -1278,11 +1270,11 @@ func TestComplexErrorChains(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !found {
 		t.Error("error chain should contain fooErr")
 	}
-	
+
 	// Should stop at unrecoverable
 	if attempts != 3 {
 		t.Errorf("expected 3 attempts (stopped at unrecoverable), got %d", attempts)
@@ -1296,27 +1288,27 @@ func TestRetryWithNilContext(t *testing.T) {
 			t.Logf("recovered from panic as expected: %v", r)
 		}
 	}()
-	
+
 	config := &Config{
 		attempts:  3,
 		delay:     time.Millisecond,
 		retryIf:   IsRecoverable,
 		delayType: FixedDelay,
-		timer:     &timerImpl{},
+		timer:     defaultTimer{},
 		context:   nil, // Intentionally nil
 		onRetry:   func(n uint, err error) {},
 	}
-	
+
 	// This should be caught by validate()
 	retryableFunc := func() (interface{}, error) {
 		return nil, errors.New("test")
 	}
-	
+
 	_, err := DoWithData(retryableFunc, func(c *Config) {
 		*c = *config
 	})
-	
-	if err == nil || err.Error() != "context cannot be nil" {
+
+	if err == nil || err.Error() != "retry: context cannot be nil" {
 		t.Errorf("expected context validation error, got: %v", err)
 	}
 }

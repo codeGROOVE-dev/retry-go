@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeGROOVE-dev/retry-go")
+	"github.com/codeGROOVE-dev/retry-go"
+)
 
 // RetriableError is a custom error that contains a positive duration for the next retry
 type RetriableError struct {
