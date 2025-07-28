@@ -422,11 +422,11 @@ func TestBackOffDelay(t *testing.T) {
 				}
 				delay := BackOffDelay(c.n, nil, &config)
 				if c.expectedMaxN != config.maxBackOffN {
-		t.Errorf("max n mismatch: got %v, want %v", config.maxBackOffN, c.expectedMaxN)
-	}
+					t.Errorf("max n mismatch: got %v, want %v", config.maxBackOffN, c.expectedMaxN)
+				}
 				if c.expectedDelay != delay {
-		t.Errorf("delay duration mismatch: got %v, want %v", delay, c.expectedDelay)
-	}
+					t.Errorf("delay duration mismatch: got %v, want %v", delay, c.expectedDelay)
+				}
 			},
 		)
 	}
@@ -481,8 +481,8 @@ func TestCombineDelay(t *testing.T) {
 				}
 				actual := CombineDelay(funcs...)(0, nil, nil)
 				if c.expected != actual {
-		t.Errorf("delay duration mismatch: got %v, want %v", actual, c.expected)
-	}
+					t.Errorf("delay duration mismatch: got %v, want %v", actual, c.expected)
+				}
 			},
 		)
 	}
@@ -503,14 +503,14 @@ func TestContext(t *testing.T) {
 		)
 		dur := time.Since(start)
 		if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+			t.Fatal("expected error, got nil")
+		}
 		if !(dur < defaultDelay) {
-		t.Errorf("cancellation timing: got duration=%v, want <defaultDelay=%v", dur, defaultDelay)
-	}
+			t.Errorf("cancellation timing: got duration=%v, want <defaultDelay=%v", dur, defaultDelay)
+		}
 		if retrySum != 0 {
-		t.Errorf("retry count: got %d, want 0", retrySum)
-	}
+			t.Errorf("retry count: got %d, want 0", retrySum)
+		}
 	})
 
 	t.Run("cancel in retry progress", func(t *testing.T) {
@@ -528,8 +528,8 @@ func TestContext(t *testing.T) {
 			Context(ctx),
 		)
 		if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+			t.Fatal("expected error, got nil")
+		}
 
 		expectedErrorFormat := `All attempts fail:
 #1: test
@@ -543,11 +543,11 @@ func TestContext(t *testing.T) {
 			t.Fatalf("expected Error type, got %T", err)
 		}
 		if expectedErrorFormat != err.Error() {
-		t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
-	}
+			t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
+		}
 		if retrySum != 2 {
-		t.Errorf("retry count: got %d, want 2", retrySum)
-	}
+			t.Errorf("retry count: got %d, want 2", retrySum)
+		}
 	})
 
 	t.Run("cancel in retry progress - last error only", func(t *testing.T) {
@@ -566,12 +566,12 @@ func TestContext(t *testing.T) {
 			LastErrorOnly(true),
 		)
 		if context.Canceled != err {
-		t.Errorf("error: got %v, want %v", err, context.Canceled)
-	}
+			t.Errorf("error: got %v, want %v", err, context.Canceled)
+		}
 
 		if retrySum != 2 {
-		t.Errorf("retry count: got %d, want 2", retrySum)
-	}
+			t.Errorf("retry count: got %d, want 2", retrySum)
+		}
 	})
 
 	t.Run("cancel in retry progress - infinite attempts", func(t *testing.T) {
@@ -594,12 +594,12 @@ func TestContext(t *testing.T) {
 			)
 
 			if context.Canceled != err {
-		t.Errorf("error: got %v, want %v", err, context.Canceled)
-	}
+				t.Errorf("error: got %v, want %v", err, context.Canceled)
+			}
 
 			if retrySum != 2 {
-		t.Errorf("retry count: got %d, want 2", retrySum)
-	}
+				t.Errorf("retry count: got %d, want 2", retrySum)
+			}
 		}()
 	})
 
@@ -621,11 +621,11 @@ func TestContext(t *testing.T) {
 			WrapContextErrorWithLastError(true),
 		)
 		if !errors.Is(err, context.Canceled) {
-		t.Errorf("errors.Is(err, context.Canceled): got false, want true")
-	}
+			t.Errorf("errors.Is(err, context.Canceled): got false, want true")
+		}
 		if !errors.Is(err, fooErr{str: "error 2"}) {
-		t.Errorf("errors.Is(err, last function error): got false, want true")
-	}
+			t.Errorf("errors.Is(err, last function error): got false, want true")
+		}
 	})
 
 	t.Run("timed out on retry infinte attempts - wraps context error with last retried function error", func(t *testing.T) {
@@ -643,11 +643,11 @@ func TestContext(t *testing.T) {
 			WrapContextErrorWithLastError(true),
 		)
 		if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("errors.Is(err, context.DeadlineExceeded): got false, want true")
-	}
+			t.Errorf("errors.Is(err, context.DeadlineExceeded): got false, want true")
+		}
 		if !errors.Is(err, fooErr{str: "error 2"}) {
-		t.Errorf("errors.Is(err, last function error): got false, want true")
-	}
+			t.Errorf("errors.Is(err, last function error): got false, want true")
+		}
 	})
 }
 
@@ -801,9 +801,9 @@ func (attemptsForErrorTestError) Error() string { return "test error" }
 func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	var count uint64
 	var timestamps []time.Time
-	
+
 	startTime := time.Now()
-	
+
 	err := Do(
 		func() error {
 			count++
@@ -817,9 +817,9 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 		LastErrorOnly(true),
 		Context(context.Background()),
 	)
-	
+
 	endTime := time.Now()
-	
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -829,17 +829,17 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	if len(timestamps) != 2 {
 		t.Errorf("timestamp count: got %d, want 2", len(timestamps))
 	}
-	
+
 	// Verify timing: first attempt at ~0ms, second at ~200ms, end immediately after second attempt
 	firstAttemptTime := timestamps[0].Sub(startTime)
 	secondAttemptTime := timestamps[1].Sub(startTime)
 	totalTime := endTime.Sub(startTime)
-	
+
 	// First attempt should be immediate
 	if firstAttemptTime >= 50*time.Millisecond {
 		t.Errorf("first attempt timing: got %v, want <50ms (should be immediate)", firstAttemptTime)
 	}
-	
+
 	// Second attempt should be after delay
 	if secondAttemptTime <= 150*time.Millisecond {
 		t.Errorf("second attempt timing: got %v, want >150ms (should be after 200ms delay)", secondAttemptTime)
@@ -847,7 +847,7 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	if secondAttemptTime >= 250*time.Millisecond {
 		t.Errorf("second attempt timing: got %v, want <250ms", secondAttemptTime)
 	}
-	
+
 	// Total time should not include delay after final attempt
 	if totalTime >= 300*time.Millisecond {
 		t.Errorf("total duration: got %v, want <300ms (no delay after final attempt)", totalTime)
@@ -857,7 +857,7 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 func TestOnRetryNotCalledOnLastAttempt(t *testing.T) {
 	callCount := 0
 	onRetryCalls := make([]uint, 0)
-	
+
 	err := Do(
 		func() error {
 			callCount++
@@ -869,7 +869,7 @@ func TestOnRetryNotCalledOnLastAttempt(t *testing.T) {
 		}),
 		Delay(time.Nanosecond),
 	)
-	
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
