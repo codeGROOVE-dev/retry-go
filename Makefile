@@ -19,13 +19,9 @@ endif
 setup:
 	go install github.com/pierrre/gotestcover@latest
 	go install golang.org/x/tools/cmd/cover@latest
-	go install github.com/robertkrimen/godocdown/godocdown@latest
 	go mod download
 
-generate: ## Generate README.md
-	godocdown >| README.md
-
-test: generate test_and_cover_report lint
+test: test_and_cover_report lint
 
 test_and_cover_report:
 	gotestcover $(TEST_OPTIONS) -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=2m

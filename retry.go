@@ -1,116 +1,71 @@
-/*
-Simple library for retry mechanism
-
-Slightly inspired by [Try::Tiny::Retry](https://metacpan.org/pod/Try::Tiny::Retry)
-
-# SYNOPSIS
-
-HTTP GET with retry:
-
-	url := "http://example.com"
-	var body []byte
-
-	err := retry.Do(
-		func() error {
-			resp, err := http.Get(url)
-			if err != nil {
-				return err
-			}
-			defer resp.Body.Close()
-			body, err = ioutil.ReadAll(resp.Body)
-			if err != nil {
-				return err
-			}
-			return nil
-		},
-	)
-
-	if err != nil {
-		// handle error
-	}
-
-	fmt.Println(string(body))
-
-HTTP GET with retry with data:
-
-	url := "http://example.com"
-
-	body, err := retry.DoWithData(
-		func() ([]byte, error) {
-			resp, err := http.Get(url)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				return nil, err
-			}
-
-			return body, nil
-		},
-	)
-
-	if err != nil {
-		// handle error
-	}
-
-	fmt.Println(string(body))
-
-[More examples](https://github.com/avast/retry-go/tree/master/examples)
-
-# SEE ALSO
-
-* [giantswarm/retry-go](https://github.com/giantswarm/retry-go) - slightly complicated interface.
-
-* [sethgrid/pester](https://github.com/sethgrid/pester) - only http retry for http calls with retries and backoff
-
-* [cenkalti/backoff](https://github.com/cenkalti/backoff) - Go port of the exponential backoff algorithm from Google's HTTP Client Library for Java. Really complicated interface.
-
-* [rafaeljesus/retry-go](https://github.com/rafaeljesus/retry-go) - looks good, slightly similar as this package, don't have 'simple' `Retry` method
-
-* [matryer/try](https://github.com/matryer/try) - very popular package, nonintuitive interface (for me)
-
-# BREAKING CHANGES
-
-* 4.0.0
-  - infinity retry is possible by set `Attempts(0)` by PR [#49](https://github.com/avast/retry-go/pull/49)
-
-* 3.0.0
-  - `DelayTypeFunc` accepts a new parameter `err` - this breaking change affects only your custom Delay Functions. This change allow [make delay functions based on error](examples/delay_based_on_error_test.go).
-
-* 1.0.2 -> 2.0.0
-  - argument of `retry.Delay` is final delay (no multiplication by `retry.Units` anymore)
-  - function `retry.Units` are removed
-  - [more about this breaking change](https://github.com/avast/retry-go/issues/7)
-
-* 0.3.0 -> 1.0.0
-  - `retry.Retry` function are changed to `retry.Do` function
-  - `retry.RetryCustom` (OnRetry) and `retry.RetryCustomWithOpts` functions are now implement via functions produces Options (aka `retry.OnRetry`)
-*/
+// Package retry provides a simple and flexible retry mechanism for Go.
+// It allows executing functions with automatic retry on failure, with configurable
+// backoff strategies, retry conditions, and error handling.
+//
+// The package is inspired by Try::Tiny::Retry from Perl.
+//
+// Basic usage:
+//
+//	url := "http://example.com"
+//	var body []byte
+//
+//	err := retry.Do(
+//		func() error {
+//			resp, err := http.Get(url)
+//			if err != nil {
+//				return err
+//			}
+//			defer resp.Body.Close()
+//			body, err = io.ReadAll(resp.Body)
+//			if err != nil {
+//				return err
+//			}
+//			return nil
+//		},
+//	)
+//
+// With data return:
+//
+//	body, err := retry.DoWithData(
+//		func() ([]byte, error) {
+//			resp, err := http.Get(url)
+//			if err != nil {
+//				return nil, err
+//			}
+//			defer resp.Body.Close()
+//			return io.ReadAll(resp.Body)
+//		},
+//	)
 package retry
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
 
-// Function signature of retryable function
+// RetryableFunc is the function signature for retryable functions used with Do.
 type RetryableFunc func() error
 
-// Function signature of retryable function with data
+// RetryableFuncWithData is the function signature for retryable functions that return data.
+// Used with DoWithData.
 type RetryableFuncWithData[T any] func() (T, error)
 
-// Default timer is a wrapper around time.After
+// timerImpl is the default Timer implementation using time.After.
 type timerImpl struct{}
 
-func (t *timerImpl) After(d time.Duration) <-chan time.Time {
+func (ti *timerImpl) After(d time.Duration) <-chan time.Time {
 	return time.After(d)
 }
 
+// Do executes the retryable function with the provided options.
+// It returns nil if the function succeeds, or an error if all retry attempts fail.
+//
+// By default, it will retry up to 10 times with exponential backoff and jitter.
+// The behavior can be customized using Option functions.
 func Do(retryableFunc RetryableFunc, opts ...Option) error {
 	retryableFuncWithData := func() (any, error) {
 		return nil, retryableFunc()
@@ -120,8 +75,13 @@ func Do(retryableFunc RetryableFunc, opts ...Option) error {
 	return err
 }
 
+// DoWithData executes the retryable function with the provided options and returns the function's data.
+// It returns the data and nil error if the function succeeds, or zero value and error if all retry attempts fail.
+//
+// By default, it will retry up to 10 times with exponential backoff and jitter.
+// The behavior can be customized using Option functions.
 func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (T, error) {
-	var n uint
+	var attempt uint
 	var emptyT T
 
 	// default
@@ -132,61 +92,110 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		opt(config)
 	}
 
+	// Validate configuration
+	if err := config.validate(); err != nil {
+		return emptyT, err
+	}
+
+	// Check if context is already done
 	if err := context.Cause(config.context); err != nil {
 		return emptyT, err
 	}
 
-	errorLog := Error{}
+	// Pre-allocate error slice with reasonable capacity to avoid multiple allocations
+	// Cap at 1000 to prevent unbounded growth in pathological cases
+	errorLogCapacity := config.attempts
+	if errorLogCapacity == 0 || errorLogCapacity > 1000 {
+		errorLogCapacity = 1000
+	}
+	errorLog := make(Error, 0, errorLogCapacity)
 
+	// Copy map to avoid modifying the original
 	attemptsForError := make(map[error]uint, len(config.attemptsForError))
 	for err, attempts := range config.attemptsForError {
 		attemptsForError[err] = attempts
 	}
 
-shouldRetry:
 	for {
+		// Check context before each attempt
+		if err := context.Cause(config.context); err != nil {
+			if config.lastErrorOnly {
+				return emptyT, err
+			}
+			if len(errorLog) < cap(errorLog) {
+				errorLog = append(errorLog, err)
+			}
+			return emptyT, errorLog
+		}
+
 		t, err := retryableFunc()
 		if err == nil {
 			return t, nil
 		}
 
-		errorLog = append(errorLog, unpackUnrecoverable(err))
-
-		if !IsRecoverable(err) {
-			return emptyT, err
+		// Only append if we haven't hit the cap to prevent unbounded growth
+		if len(errorLog) < cap(errorLog) {
+			errorLog = append(errorLog, unpackUnrecoverable(err))
 		}
 
-		if !config.retryIf(err) {
-			break
+		// Check if we should stop retrying
+		if !IsRecoverable(err) || !config.retryIf(err) {
+			if config.lastErrorOnly {
+				return emptyT, err
+			}
+			// For unrecoverable errors on first attempt, return the error directly
+			if len(errorLog) == 1 && !IsRecoverable(err) {
+				return emptyT, err
+			}
+			return emptyT, errorLog
 		}
 
+		// Check error-specific attempt limits
+		shouldStop := false
 		for errToCheck, attempts := range attemptsForError {
 			if errors.Is(err, errToCheck) {
 				attempts--
 				attemptsForError[errToCheck] = attempts
 				if attempts <= 0 {
-					break shouldRetry
+					shouldStop = true
+					break
 				}
 			}
 		}
-
-		// Setting attempts to 0 means we'll retry until we succeed
-		// if this is last attempt - don't wait
-		if n == config.attempts-1 {
-			break shouldRetry
+		if shouldStop {
+			break
 		}
 
-		config.onRetry(n, err)
+		// Check if this is the last attempt (when attempts > 0)
+		if config.attempts > 0 && attempt >= config.attempts-1 {
+			break
+		}
 
-		n++
+		// Call onRetry callback
+		config.onRetry(attempt, err)
+
+		// Increment attempt counter with overflow check
+		if attempt == math.MaxUint {
+			break // Prevent overflow
+		}
+		attempt++
+
+		// Wait for next attempt
+		delayDuration := delay(config, attempt, err)
 		select {
-		case <-config.timer.After(delay(config, n, err)):
+		case <-config.timer.After(delayDuration):
 		case <-config.context.Done():
+			contextErr := context.Cause(config.context)
 			if config.lastErrorOnly {
-				return emptyT, context.Cause(config.context)
+				if config.wrapContextErrorWithLastError && err != nil {
+					return emptyT, fmt.Errorf("%w: %w", contextErr, err)
+				}
+				return emptyT, contextErr
 			}
-
-			return emptyT, append(errorLog, context.Cause(config.context))
+			if len(errorLog) < cap(errorLog) {
+				errorLog = append(errorLog, contextErr)
+			}
+			return emptyT, errorLog
 		}
 	}
 
@@ -211,55 +220,59 @@ func newDefaultRetryConfig() *Config {
 	}
 }
 
-// Error type represents list of errors in retry
+// Error represents a collection of errors that occurred during retry attempts.
+// It implements the error interface and provides compatibility with errors.Is,
+// errors.As, and errors.Unwrap.
 type Error []error
 
-// Error method return string representation of Error
-// It is an implementation of error interface
+// Error returns a string representation of all errors that occurred during retry attempts.
+// Each error is prefixed with its attempt number.
 func (e Error) Error() string {
 	logWithNumber := make([]string, len(e))
-	for i, l := range e {
-		if l != nil {
-			logWithNumber[i] = fmt.Sprintf("#%d: %s", i+1, l.Error())
+	for i, err := range e {
+		if err != nil {
+			logWithNumber[i] = fmt.Sprintf("#%d: %s", i+1, err.Error())
 		}
 	}
 
 	return fmt.Sprintf("All attempts fail:\n%s", strings.Join(logWithNumber, "\n"))
 }
 
+// Is reports whether any error in e matches target.
+// It implements support for errors.Is.
 func (e Error) Is(target error) bool {
-	for _, v := range e {
-		if errors.Is(v, target) {
+	for _, err := range e {
+		if errors.Is(err, target) {
 			return true
 		}
 	}
 	return false
 }
 
+// As finds the first error in e that matches target, and if so,
+// sets target to that error value and returns true.
+// It implements support for errors.As.
 func (e Error) As(target interface{}) bool {
-	for _, v := range e {
-		if errors.As(v, target) {
+	for _, err := range e {
+		if errors.As(err, target) {
 			return true
 		}
 	}
 	return false
 }
 
-/*
-Unwrap the last error for compatibility with `errors.Unwrap()`.
-When you need to unwrap all errors, you should use `WrappedErrors()` instead.
-
-	err := Do(
-		func() error {
-			return errors.New("original error")
-		},
-		Attempts(1),
-	)
-
-	fmt.Println(errors.Unwrap(err)) # "original error" is printed
-
-Added in version 4.2.0.
-*/
+// Unwrap returns the last error for compatibility with errors.Unwrap.
+// When you need to unwrap all errors, you should use WrappedErrors instead.
+//
+// Example:
+//
+//	err := Do(
+//		func() error {
+//			return errors.New("original error")
+//		},
+//		Attempts(1),
+//	)
+//	fmt.Println(errors.Unwrap(err)) // "original error" is printed
 func (e Error) Unwrap() error {
 	return e[len(e)-1]
 }
@@ -276,28 +289,31 @@ type unrecoverableError struct {
 	error
 }
 
-func (e unrecoverableError) Error() string {
-	if e.error == nil {
+func (ue unrecoverableError) Error() string {
+	if ue.error == nil {
 		return "unrecoverable error"
 	}
-	return e.error.Error()
+	return ue.error.Error()
 }
 
-func (e unrecoverableError) Unwrap() error {
-	return e.error
+func (ue unrecoverableError) Unwrap() error {
+	return ue.error
 }
 
-// Unrecoverable wraps an error in `unrecoverableError` struct
+// Unrecoverable wraps an error to mark it as unrecoverable.
+// When an unrecoverable error is returned, the retry mechanism will stop immediately.
 func Unrecoverable(err error) error {
 	return unrecoverableError{err}
 }
 
-// IsRecoverable checks if error is an instance of `unrecoverableError`
+// IsRecoverable reports whether err is recoverable.
+// It returns false if err is or wraps an unrecoverable error.
 func IsRecoverable(err error) bool {
 	return !errors.Is(err, unrecoverableError{})
 }
 
-// Adds support for errors.Is usage on unrecoverableError
+// Is implements error matching for unrecoverableError.
+// It supports errors.Is by checking if the target is also an unrecoverableError.
 func (unrecoverableError) Is(err error) bool {
 	_, isUnrecoverable := err.(unrecoverableError)
 	return isUnrecoverable
@@ -311,8 +327,15 @@ func unpackUnrecoverable(err error) error {
 	return err
 }
 
-func delay(config *Config, n uint, err error) time.Duration {
-	delayTime := config.delayType(n, err, config)
+func delay(config *Config, attempt uint, err error) time.Duration {
+	delayTime := config.delayType(attempt, err, config)
+	
+	// Ensure delay is non-negative
+	if delayTime < 0 {
+		delayTime = 0
+	}
+	
+	// Apply max delay cap if configured
 	if config.maxDelay > 0 && delayTime > config.maxDelay {
 		delayTime = config.maxDelay
 	}
