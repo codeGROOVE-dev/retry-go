@@ -2,6 +2,8 @@
 // It allows executing functions with automatic retry on failure, with configurable
 // backoff strategies, retry conditions, and error handling.
 //
+// The package is safe for concurrent use.
+//
 // The package is inspired by Try::Tiny::Retry from Perl.
 //
 // Basic usage:
@@ -54,10 +56,9 @@ type RetryableFunc func() error
 // Used with DoWithData.
 type RetryableFuncWithData[T any] func() (T, error)
 
-// timerImpl is the default Timer implementation using time.After.
-type timerImpl struct{}
+type defaultTimer struct{}
 
-func (ti *timerImpl) After(d time.Duration) <-chan time.Time {
+func (defaultTimer) After(d time.Duration) <-chan time.Time {
 	return time.After(d)
 }
 
@@ -84,8 +85,19 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 	var attempt uint
 	var emptyT T
 
-	// default
-	config := newDefaultRetryConfig()
+	// default config
+	config := &Config{
+		attempts:         10,
+		attemptsForError: make(map[error]uint),
+		delay:            100 * time.Millisecond,
+		maxJitter:        100 * time.Millisecond,
+		onRetry:          func(n uint, err error) {},
+		retryIf:          IsRecoverable,
+		delayType:        CombineDelay(BackOffDelay, RandomDelay),
+		lastErrorOnly:    false,
+		context:          context.Background(),
+		timer:            defaultTimer{},
+	}
 
 	// apply opts
 	for _, opt := range opts {
@@ -102,22 +114,22 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		return emptyT, err
 	}
 
-	// Pre-allocate error slice with reasonable capacity to avoid multiple allocations
-	// Cap at 1000 to prevent unbounded growth in pathological cases
-	errorLogCapacity := config.attempts
-	if errorLogCapacity == 0 || errorLogCapacity > 1000 {
-		errorLogCapacity = 1000
+	// Pre-allocate error slice with bounded capacity to prevent memory exhaustion.
+	const maxErrors = 1000 // Limit to prevent DoS through memory consumption.
+	capacity := config.attempts
+	if capacity == 0 || capacity > maxErrors {
+		capacity = maxErrors
 	}
-	errorLog := make(Error, 0, errorLogCapacity)
+	errorLog := make(Error, 0, capacity)
 
-	// Copy map to avoid modifying the original
+	// Copy map to avoid modifying the original.
 	attemptsForError := make(map[error]uint, len(config.attemptsForError))
 	for err, attempts := range config.attemptsForError {
 		attemptsForError[err] = attempts
 	}
 
 	for {
-		// Check context before each attempt
+		// Check context before each attempt.
 		if err := context.Cause(config.context); err != nil {
 			if config.lastErrorOnly {
 				return emptyT, err
@@ -133,64 +145,75 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 			return t, nil
 		}
 
-		// Only append if we haven't hit the cap to prevent unbounded growth
+		// Only append if we haven't hit the cap to prevent unbounded growth.
 		if len(errorLog) < cap(errorLog) {
-			errorLog = append(errorLog, unpackUnrecoverable(err))
+			// Unpack unrecoverable errors to store the underlying error.
+			if u, ok := err.(unrecoverableError); ok {
+				errorLog = append(errorLog, u.error)
+			} else {
+				errorLog = append(errorLog, err)
+			}
 		}
 
-		// Check if we should stop retrying
+		// Check if we should stop retrying.
 		if !IsRecoverable(err) || !config.retryIf(err) {
 			if config.lastErrorOnly {
 				return emptyT, err
 			}
-			// For unrecoverable errors on first attempt, return the error directly
+			// For unrecoverable errors on first attempt, return the error directly.
 			if len(errorLog) == 1 && !IsRecoverable(err) {
 				return emptyT, err
 			}
 			return emptyT, errorLog
 		}
 
-		// Check error-specific attempt limits
-		shouldStop := false
+		// Check error-specific attempt limits.
+		stop := false
 		for errToCheck, attempts := range attemptsForError {
 			if errors.Is(err, errToCheck) {
 				attempts--
 				attemptsForError[errToCheck] = attempts
 				if attempts <= 0 {
-					shouldStop = true
+					stop = true
 					break
 				}
 			}
 		}
-		if shouldStop {
+		if stop {
 			break
 		}
 
-		// Check if this is the last attempt (when attempts > 0)
+		// Check if this is the last attempt (when attempts > 0).
 		if config.attempts > 0 && attempt >= config.attempts-1 {
 			break
 		}
 
-		// Call onRetry callback
+		// Call onRetry callback.
 		config.onRetry(attempt, err)
 
-		// Increment attempt counter with overflow check
+		// Increment attempt counter.
 		if attempt == math.MaxUint {
-			break // Prevent overflow
+			break
 		}
 		attempt++
 
-		// Wait for next attempt - inline delay calculation for performance
-		delayTime := config.delayType(attempt, err, config)
-		if delayTime < 0 {
-			delayTime = 0
+		// Calculate delay.
+		delay := config.delayType(attempt, err, config)
+		if delay < 0 {
+			delay = 0
 		}
-		if config.maxDelay > 0 && delayTime > config.maxDelay {
-			delayTime = config.maxDelay
+		if config.maxDelay > 0 && delay > config.maxDelay {
+			delay = config.maxDelay
 		}
-		
+
+		// Protect against timer implementations that might return nil channel.
+		timer := config.timer.After(delay)
+		if timer == nil {
+			return emptyT, fmt.Errorf("retry: timer.After returned nil channel")
+		}
+
 		select {
-		case <-config.timer.After(delayTime):
+		case <-timer:
 		case <-config.context.Done():
 			contextErr := context.Cause(config.context)
 			if config.lastErrorOnly {
@@ -212,21 +235,6 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 	return emptyT, errorLog
 }
 
-func newDefaultRetryConfig() *Config {
-	return &Config{
-		attempts:         uint(10),
-		attemptsForError: make(map[error]uint),
-		delay:            100 * time.Millisecond,
-		maxJitter:        100 * time.Millisecond,
-		onRetry:          func(n uint, err error) {},
-		retryIf:          IsRecoverable,
-		delayType:        CombineDelay(BackOffDelay, RandomDelay),
-		lastErrorOnly:    false,
-		context:          context.Background(),
-		timer:            &timerImpl{},
-	}
-}
-
 // Error represents a collection of errors that occurred during retry attempts.
 // It implements the error interface and provides compatibility with errors.Is,
 // errors.As, and errors.Unwrap.
@@ -236,23 +244,18 @@ type Error []error
 // Each error is prefixed with its attempt number.
 func (e Error) Error() string {
 	if len(e) == 0 {
-		return "All attempts fail:"
+		return "retry: all attempts failed"
 	}
-	
-	// Use strings.Builder for efficient string concatenation
+
 	var b strings.Builder
-	b.WriteString("All attempts fail:")
-	
+	b.WriteString("retry: all attempts failed:")
+
 	for i, err := range e {
 		if err != nil {
-			b.WriteByte('\n')
-			b.WriteByte('#')
-			b.WriteString(fmt.Sprint(i + 1))
-			b.WriteString(": ")
-			b.WriteString(err.Error())
+			fmt.Fprintf(&b, "\n#%d: %s", i+1, err.Error())
 		}
 	}
-	
+
 	return b.String()
 }
 
@@ -309,7 +312,7 @@ type unrecoverableError struct {
 
 func (ue unrecoverableError) Error() string {
 	if ue.error == nil {
-		return "unrecoverable error"
+		return "retry: unrecoverable error with nil value"
 	}
 	return ue.error.Error()
 }
@@ -331,16 +334,7 @@ func IsRecoverable(err error) bool {
 }
 
 // Is implements error matching for unrecoverableError.
-// It supports errors.Is by checking if the target is also an unrecoverableError.
 func (unrecoverableError) Is(err error) bool {
 	_, ok := err.(unrecoverableError)
 	return ok
 }
-
-func unpackUnrecoverable(err error) error {
-	if u, ok := err.(unrecoverableError); ok {
-		return u.error
-	}
-	return err
-}
-

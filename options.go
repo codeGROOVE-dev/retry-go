@@ -23,6 +23,10 @@ type DelayTypeFunc func(attempt uint, err error, config *Config) time.Duration
 // Timer provides an interface for time operations in retry logic.
 // This abstraction allows for mocking time in tests and implementing
 // custom timing behaviors. The standard implementation uses time.After.
+//
+// Security note: Custom Timer implementations must return a valid channel
+// that either receives a time value or blocks. Returning nil will cause
+// the retry to fail immediately.
 type Timer interface {
 	// After returns a channel that sends the current time after the duration elapses.
 	// It should behave like time.After.
@@ -34,49 +38,52 @@ type Timer interface {
 // constructed directly. Use the various Option functions like Attempts,
 // Delay, and RetryIf to configure retry behavior.
 type Config struct {
-	attempts                      uint
-	attemptsForError              map[error]uint
-	delay                         time.Duration
-	maxDelay                      time.Duration
-	maxJitter                     time.Duration
-	onRetry                       OnRetryFunc
-	retryIf                       RetryIfFunc
-	delayType                     DelayTypeFunc
-	lastErrorOnly                 bool
-	context     context.Context
-	timer       Timer
-	wrapLastErr bool // wrap context error with last function error
-
-	maxBackOffN uint
+	attempts         uint
+	attemptsForError map[error]uint
+	delay            time.Duration
+	maxDelay         time.Duration
+	maxJitter        time.Duration
+	onRetry          OnRetryFunc
+	retryIf          RetryIfFunc
+	delayType        DelayTypeFunc
+	lastErrorOnly    bool
+	context          context.Context
+	timer            Timer
+	wrapLastErr      bool // wrap context error with last function error
 }
 
 // validate checks if the configuration is valid and safe to use.
 func (c *Config) validate() error {
-	// Ensure delay values are non-negative
+	// Ensure delay values are non-negative.
 	if c.delay < 0 {
-		return fmt.Errorf("delay must be non-negative, got %v", c.delay)
+		return fmt.Errorf("retry: delay must be non-negative, got %v", c.delay)
 	}
 	if c.maxDelay < 0 {
-		return fmt.Errorf("maxDelay must be non-negative, got %v", c.maxDelay)
+		return fmt.Errorf("retry: maxDelay must be non-negative, got %v", c.maxDelay)
 	}
 	if c.maxJitter < 0 {
-		return fmt.Errorf("maxJitter must be non-negative, got %v", c.maxJitter)
+		return fmt.Errorf("retry: maxJitter must be non-negative, got %v", c.maxJitter)
 	}
-	
-	// Ensure we have required functions
+
+	// Ensure we have required functions.
 	if c.retryIf == nil {
-		return fmt.Errorf("retry if function cannot be nil")
+		return fmt.Errorf("retry: retryIf function cannot be nil")
 	}
 	if c.delayType == nil {
-		return fmt.Errorf("delay type function cannot be nil")
+		return fmt.Errorf("retry: delayType function cannot be nil")
 	}
 	if c.timer == nil {
-		return fmt.Errorf("timer cannot be nil")
+		return fmt.Errorf("retry: timer cannot be nil")
 	}
 	if c.context == nil {
-		return fmt.Errorf("context cannot be nil")
+		return fmt.Errorf("retry: context cannot be nil")
 	}
-	
+
+	// Ensure map is initialized.
+	if c.attemptsForError == nil {
+		c.attemptsForError = make(map[error]uint)
+	}
+
 	return nil
 }
 
@@ -84,8 +91,6 @@ func (c *Config) validate() error {
 // to Do or DoWithData. Later options override earlier ones if they modify the
 // same configuration field.
 type Option func(*Config)
-
-func emptyOption(c *Config) {}
 
 // LastErrorOnly configures whether to return only the last error that occurred,
 // or wrap all errors together. Default is false (return all errors).
@@ -114,8 +119,15 @@ func UntilSucceeded() Option {
 // AttemptsForError sets a specific number of retry attempts for a particular error.
 // These attempts are counted against the total retry limit.
 // The retry stops when either the specific error limit or total limit is reached.
+// Note: errors are compared using errors.Is for matching.
 func AttemptsForError(attempts uint, err error) Option {
 	return func(c *Config) {
+		if err == nil {
+			return // Ignore nil errors.
+		}
+		if c.attemptsForError == nil {
+			c.attemptsForError = make(map[error]uint)
+		}
 		c.attemptsForError[err] = attempts
 	}
 }
@@ -148,58 +160,50 @@ func MaxJitter(maxJitter time.Duration) Option {
 // DelayType sets the delay calculation function between retries.
 // Default is CombineDelay(BackOffDelay, RandomDelay).
 func DelayType(delayType DelayTypeFunc) Option {
-	if delayType == nil {
-		return emptyOption
-	}
 	return func(c *Config) {
-		c.delayType = delayType
+		if delayType != nil {
+			c.delayType = delayType
+		}
 	}
 }
 
 // BackOffDelay implements exponential backoff delay strategy.
 // Each retry attempt doubles the delay, up to a maximum.
 func BackOffDelay(attempt uint, _ error, config *Config) time.Duration {
-	// 1 << 63 would overflow signed int64 (time.Duration), thus 62.
-	const maxShift uint = 62
-
-	// Initialize maxBackOffN if not already set
-	if config.maxBackOffN == 0 {
-		// Ensure delay is positive for calculation
-		baseDelay := config.delay
-		if baseDelay <= 0 {
-			config.delay = 1
-			baseDelay = 1
-		}
-
-		// Calculate the maximum number of shifts that won't overflow
-		// Original algorithm: max - floor(log2(delay))
-		config.maxBackOffN = maxShift - uint(math.Floor(math.Log2(float64(baseDelay))))
-	}
-
-	// Decrement attempt for zero-based indexing
+	// Adjust for zero-based indexing.
 	if attempt > 0 {
 		attempt--
 	}
 
-	// Cap the attempt to prevent overflow
-	if attempt > config.maxBackOffN {
-		attempt = config.maxBackOffN
+	// Cap attempt to prevent overflow.
+	if attempt > 62 {
+		attempt = 62
 	}
 
-	// Safe bit shift that won't overflow
-	return config.delay << attempt
+	// Simple exponential backoff.
+	delay := config.delay
+	if delay <= 0 {
+		delay = 1
+	}
+
+	// Check if shift would overflow.
+	if delay > time.Duration(math.MaxInt64)>>attempt {
+		return time.Duration(math.MaxInt64)
+	}
+
+	return delay << attempt
 }
 
 // FixedDelay implements a constant delay strategy.
 // The delay is always config.delay regardless of attempt number.
-func FixedDelay(attempt uint, _ error, config *Config) time.Duration {
+func FixedDelay(_ uint, _ error, config *Config) time.Duration {
 	return config.delay
 }
 
 // RandomDelay implements a random delay strategy.
 // Returns a random duration between 0 and config.maxJitter.
-func RandomDelay(attempt uint, _ error, config *Config) time.Duration {
-	// Ensure maxJitter is positive to avoid panic in rand.Int63n
+func RandomDelay(_ uint, _ error, config *Config) time.Duration {
+	// Ensure maxJitter is positive to avoid panic in rand.Int63n.
 	if config.maxJitter <= 0 {
 		return 0
 	}
@@ -215,7 +219,7 @@ func CombineDelay(delays ...DelayTypeFunc) DelayTypeFunc {
 		var total time.Duration
 		for _, delayFunc := range delays {
 			d := delayFunc(attempt, err, config)
-			// Prevent overflow by checking if we can safely add
+			// Prevent overflow by checking if we can safely add.
 			if d > 0 && total > maxDuration-d {
 				return maxDuration
 			}
@@ -226,51 +230,38 @@ func CombineDelay(delays ...DelayTypeFunc) DelayTypeFunc {
 	}
 }
 
-// FullJitterBackoffDelay is a DelayTypeFunc that calculates delay using exponential backoff
-// with full jitter. The delay is a random value between 0 and the current backoff ceiling.
-// Formula: sleep = random_between(0, min(cap, base * 2^attempt))
-// It uses config.Delay as the base delay and config.MaxDelay as the cap.
+// FullJitterBackoffDelay implements exponential backoff with full jitter.
+// It returns a random delay between 0 and min(maxDelay, baseDelay * 2^attempt).
 func FullJitterBackoffDelay(attempt uint, err error, config *Config) time.Duration {
-	// Ensure base delay is non-negative
-	baseDelay := config.delay
-	if baseDelay < 0 {
-		baseDelay = 0
-	}
-
-	// Prevent overflow in exponential calculation
-	// If attempt is too large, just use maxDelay or a large value
-	if attempt > 62 { // 2^63 would overflow
-		if config.maxDelay > 0 {
-			return time.Duration(rand.Int63n(int64(config.maxDelay))) // #nosec G404
-		}
-		// Use a reasonable large delay instead of overflowing
-		return time.Duration(rand.Int63n(int64(time.Hour * 24))) // #nosec G404
-	}
-
-	// Calculate backoff ceiling safely
-	var backoffCeiling time.Duration
-	if baseDelay > 0 {
-		// Check if baseDelay << attempt would overflow
-		maxShift := time.Duration(math.MaxInt64) >> attempt
-		if baseDelay <= maxShift {
-			backoffCeiling = baseDelay << attempt
-		} else {
-			backoffCeiling = time.Duration(math.MaxInt64)
-		}
-	}
-
-	// Apply max delay cap if set
-	if config.maxDelay > 0 && backoffCeiling > config.maxDelay {
-		backoffCeiling = config.maxDelay
-	}
-
-	// No delay if ceiling is zero
-	if backoffCeiling <= 0 {
+	// Handle zero/negative base delay.
+	base := config.delay
+	if base <= 0 {
 		return 0
 	}
 
-	// Generate jitter
-	return time.Duration(rand.Int63n(int64(backoffCeiling))) // #nosec G404 -- Using math/rand is acceptable for non-security critical jitter.
+	// Cap attempt to prevent overflow.
+	if attempt > 62 {
+		attempt = 62
+	}
+
+	// Calculate ceiling with overflow check.
+	var ceiling time.Duration
+	if base > time.Duration(math.MaxInt64)>>attempt {
+		ceiling = time.Duration(math.MaxInt64)
+	} else {
+		ceiling = base << attempt
+	}
+
+	// Apply max delay cap if set.
+	if config.maxDelay > 0 && ceiling > config.maxDelay {
+		ceiling = config.maxDelay
+	}
+
+	// Return random delay up to ceiling.
+	if ceiling <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int63n(int64(ceiling))) // #nosec G404 - math/rand is acceptable for jitter.
 }
 
 // OnRetry sets a callback function that is called after each failed attempt.
@@ -287,11 +278,10 @@ func FullJitterBackoffDelay(attempt uint, err error, config *Config) time.Durati
 //		}),
 //	)
 func OnRetry(onRetry OnRetryFunc) Option {
-	if onRetry == nil {
-		return emptyOption
-	}
 	return func(c *Config) {
-		c.onRetry = onRetry
+		if onRetry != nil {
+			c.onRetry = onRetry
+		}
 	}
 }
 
@@ -321,11 +311,10 @@ func OnRetry(onRetry OnRetryFunc) Option {
 //		}
 //	)
 func RetryIf(retryIf RetryIfFunc) Option {
-	if retryIf == nil {
-		return emptyOption
-	}
 	return func(c *Config) {
-		c.retryIf = retryIf
+		if retryIf != nil {
+			c.retryIf = retryIf
+		}
 	}
 }
 
@@ -350,22 +339,20 @@ func Context(ctx context.Context) Option {
 	}
 }
 
-// WithTimer provides a way to swap out timer module implementations.
-// This primarily is useful for mocking/testing, where you may not want to explicitly wait for a set duration
-// for retries.
+// WithTimer provides a way to swap out timer implementations.
+// This is primarily useful for testing.
 //
-// example of augmenting time.After with a print statement
+// Example:
 //
-//	type struct MyTimer {}
+//	type mockTimer struct{}
 //
-//	func (t *MyTimer) After(d time.Duration) <- chan time.Time {
-//	    fmt.Print("Timer called!")
-//	    return time.After(d)
+//	func (mockTimer) After(d time.Duration) <-chan time.Time {
+//		return time.After(0) // immediate return for tests
 //	}
 //
 //	retry.Do(
-//	    func() error { ... },
-//		   retry.WithTimer(&MyTimer{})
+//		func() error { ... },
+//		retry.WithTimer(mockTimer{}),
 //	)
 func WithTimer(t Timer) Option {
 	return func(c *Config) {
