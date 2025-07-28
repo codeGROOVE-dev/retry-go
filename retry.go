@@ -188,8 +188,6 @@ shouldRetry:
 			break
 		}
 
-		config.onRetry(n, err)
-
 		for errToCheck, attempts := range attemptsForError {
 			if errors.Is(err, errToCheck) {
 				attempts--
@@ -204,6 +202,9 @@ shouldRetry:
 		if n == config.attempts-1 {
 			break shouldRetry
 		}
+
+		config.onRetry(n, err)
+
 		n++
 		select {
 		case <-config.timer.After(delay(config, n, err)):
