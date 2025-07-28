@@ -143,8 +143,8 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		attemptsForError[err] = attempts
 	}
 
-	shouldRetry := true
-	for shouldRetry {
+shouldRetry:
+	for {
 		t, err := retryableFunc()
 		if err == nil {
 			return t, nil
@@ -160,21 +160,24 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 			break
 		}
 
-		config.onRetry(n, err)
-
 		for errToCheck, attempts := range attemptsForError {
 			if errors.Is(err, errToCheck) {
 				attempts--
 				attemptsForError[errToCheck] = attempts
-				shouldRetry = shouldRetry && attempts > 0
+				if attempts <= 0 {
+					break shouldRetry
+				}
 			}
 		}
 
 		// Setting attempts to 0 means we'll retry until we succeed
 		// if this is last attempt - don't wait
-		if config.attempts != 0 && n == config.attempts-1 {
-			break
+		if n == config.attempts-1 {
+			break shouldRetry
 		}
+
+		config.onRetry(n, err)
+
 		n++
 		select {
 		case <-config.timer.After(delay(config, n, err)):
@@ -185,7 +188,6 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 
 			return emptyT, append(errorLog, context.Cause(config.context))
 		}
-
 	}
 
 	if config.lastErrorOnly {
