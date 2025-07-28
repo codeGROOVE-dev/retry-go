@@ -2,7 +2,6 @@
 
 [![Release](https://img.shields.io/github/release/codeGROOVE-dev/retry-go.svg?style=flat-square)](https://github.com/codeGROOVE-dev/retry-go/releases/latest)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
-![GitHub Actions](https://github.com/codeGROOVE-dev/retry-go/actions/workflows/workflow.yaml/badge.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/retry-go?style=flat-square)](https://goreportcard.com/report/github.com/codeGROOVE-dev/retry-go)
 [![Go Reference](https://pkg.go.dev/badge/github.com/codeGROOVE-dev/retry-go.svg)](https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go)
 
@@ -25,6 +24,8 @@ This fork retains the original v4 API provided by the retry-go codebase, and is 
 **Original Project:** [github.com/avast/retry-go](https://github.com/avast/retry-go)
 
 # SYNOPSIS
+
+For full package documentation, see https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go
 
 HTTP GET with retry:
 
@@ -80,6 +81,8 @@ HTTP GET with retry with data:
 
 [More examples](https://github.com/codeGROOVE-dev/retry-go/tree/master/examples)
 
+
+
 # SEE ALSO
 
 * [giantswarm/retry-go](https://github.com/giantswarm/retry-go) - slightly
@@ -102,15 +105,7 @@ nonintuitive interface (for me)
 
 Contributions are very much welcome.
 
-### Makefile
-
-Makefile provides several handy rules, like README.md `generator` , `setup` for prepare build/dev environment, `test`, `cover`, etc...
-
-Try `make help` for more information.
-
 ### Before pull request
-
-> maybe you need `make setup` in order to setup environment
 
 please try:
 * run tests (`make test`)
