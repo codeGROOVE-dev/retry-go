@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"reflect"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestDoWithDataAllFailed(t *testing.T) {
@@ -19,8 +18,12 @@ func TestDoWithDataAllFailed(t *testing.T) {
 		OnRetry(func(n uint, err error) { retrySum += n }),
 		Delay(time.Nanosecond),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, 0, v)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if v != 0 {
+		t.Errorf("got v=%d, want 0", v)
+	}
 
 	expectedErrorFormat := `All attempts fail:
 #1: test
@@ -33,10 +36,20 @@ func TestDoWithDataAllFailed(t *testing.T) {
 #8: test
 #9: test
 #10: test`
-	assert.Len(t, err, 10)
+	if retryErr, ok := err.(Error); ok {
+		if len(retryErr) != 10 {
+			t.Errorf("error count: got %d, want 10", len(retryErr))
+		}
+	} else {
+		t.Fatalf("expected Error type, got %T", err)
+	}
 	fmt.Println(err.Error())
-	assert.Equal(t, expectedErrorFormat, err.Error(), "retry error format")
-	assert.Equal(t, uint(36), retrySum, "right count of retry")
+	if err.Error() != expectedErrorFormat {
+		t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
+	}
+	if retrySum != uint(36) {
+		t.Errorf("retry sum: got %d, want 36", retrySum)
+	}
 }
 
 func TestDoFirstOk(t *testing.T) {
@@ -45,8 +58,12 @@ func TestDoFirstOk(t *testing.T) {
 		func() error { return nil },
 		OnRetry(func(n uint, err error) { retrySum += n }),
 	)
-	assert.NoError(t, err)
-	assert.Equal(t, uint(0), retrySum, "no retry")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if uint(0) != retrySum {
+		t.Errorf("retrySum (expected no retries): got %d, want 0", retrySum)
+	}
 }
 
 func TestDoWithDataFirstOk(t *testing.T) {
@@ -57,9 +74,15 @@ func TestDoWithDataFirstOk(t *testing.T) {
 		func() (int, error) { return returnVal, nil },
 		OnRetry(func(n uint, err error) { retrySum += n }),
 	)
-	assert.NoError(t, err)
-	assert.Equal(t, returnVal, val)
-	assert.Equal(t, uint(0), retrySum, "no retry")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if returnVal != val {
+		t.Errorf("return value: got %d, want %d", val, returnVal)
+	}
+	if uint(0) != retrySum {
+		t.Errorf("retrySum (expected no retries): got %d, want 0", retrySum)
+	}
 }
 
 func TestRetryIf(t *testing.T) {
@@ -78,15 +101,27 @@ func TestRetryIf(t *testing.T) {
 		}),
 		Delay(time.Nanosecond),
 	)
-	assert.Error(t, err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 
 	expectedErrorFormat := `All attempts fail:
 #1: test
 #2: test
 #3: special`
-	assert.Len(t, err, 3)
-	assert.Equal(t, expectedErrorFormat, err.Error(), "retry error format")
-	assert.Equal(t, uint(2), retryCount, "right count of retry")
+	if retryErr, ok := err.(Error); ok {
+		if len(retryErr) != 3 {
+			t.Errorf("error count: got %d, want 3", len(retryErr))
+		}
+	} else {
+		t.Fatalf("expected Error type, got %T", err)
+	}
+	if err.Error() != expectedErrorFormat {
+		t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
+	}
+	if uint(2) != retryCount {
+		t.Errorf("retry count: got %d, want 2", retryCount)
+	}
 }
 
 func TestRetryIf_ZeroAttempts(t *testing.T) {
@@ -108,10 +143,16 @@ func TestRetryIf_ZeroAttempts(t *testing.T) {
 		LastErrorOnly(true),
 		Attempts(0),
 	)
-	assert.Error(t, err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 
-	assert.Equal(t, "special", err.Error(), "retry error format")
-	assert.Equal(t, retryCount, onRetryCount+1, "right count of retry")
+	if "special" != err.Error() {
+		t.Errorf("error message: got %q, want %q", err.Error(), "special")
+	}
+	if retryCount != onRetryCount+1 {
+		t.Errorf("retry count vs onRetry count: got retryCount=%d, onRetryCount=%d, want retryCount=onRetryCount+1", retryCount, onRetryCount)
+	}
 }
 
 func TestZeroAttemptsWithError(t *testing.T) {
@@ -130,9 +171,13 @@ func TestZeroAttemptsWithError(t *testing.T) {
 		Attempts(0),
 		MaxDelay(time.Nanosecond),
 	)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	assert.Equal(t, count, maxErrors)
+	if maxErrors != count {
+		t.Errorf("execution count: got %d, want %d", count, maxErrors)
+	}
 }
 
 func TestZeroAttemptsWithoutError(t *testing.T) {
@@ -146,21 +191,30 @@ func TestZeroAttemptsWithoutError(t *testing.T) {
 		},
 		Attempts(0),
 	)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	assert.Equal(t, count, 1)
+	if 1 != count {
+		t.Errorf("execution count: got %d, want 1", count)
+	}
 }
 
 func TestZeroAttemptsWithUnrecoverableError(t *testing.T) {
 	err := Do(
 		func() error {
-			return Unrecoverable(assert.AnError)
+			return Unrecoverable(errors.New("test error"))
 		},
 		Attempts(0),
 		MaxDelay(time.Nanosecond),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, Unrecoverable(assert.AnError), err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	expectedErr := Unrecoverable(errors.New("test error"))
+	if err.Error() != expectedErr.Error() {
+		t.Errorf("got %v, want %v", err, expectedErr)
+	}
 }
 
 func TestAttemptsForError(t *testing.T) {
@@ -175,8 +229,12 @@ func TestAttemptsForError(t *testing.T) {
 		AttemptsForError(attemptsForTestError, testErr),
 		Attempts(5),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, attemptsForTestError, count)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if count != attemptsForTestError {
+		t.Errorf("attempt count: got %d, want %d", count, attemptsForTestError)
+	}
 }
 
 func TestDefaultSleep(t *testing.T) {
@@ -186,8 +244,12 @@ func TestDefaultSleep(t *testing.T) {
 		Attempts(3),
 	)
 	dur := time.Since(start)
-	assert.Error(t, err)
-	assert.Greater(t, dur, 300*time.Millisecond, "3 times default retry is longer then 300ms")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if dur <= 300*time.Millisecond {
+		t.Errorf("retry duration too short: got %v, want >300ms (3 retries with default delay)", dur)
+	}
 }
 
 func TestFixedSleep(t *testing.T) {
@@ -198,8 +260,12 @@ func TestFixedSleep(t *testing.T) {
 		DelayType(FixedDelay),
 	)
 	dur := time.Since(start)
-	assert.Error(t, err)
-	assert.Less(t, dur, 500*time.Millisecond, "3 times default retry is shorter then 500ms")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if dur >= 500*time.Millisecond {
+		t.Errorf("retry duration too long: got %v, want <500ms (3 retries with fixed delay)", dur)
+	}
 }
 
 func TestLastErrorOnly(t *testing.T) {
@@ -210,8 +276,12 @@ func TestLastErrorOnly(t *testing.T) {
 		Delay(time.Nanosecond),
 		LastErrorOnly(true),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, "9", err.Error())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "9" {
+		t.Errorf("error message: got %q, want %q", err.Error(), "9")
+	}
 }
 
 func TestUnrecoverableError(t *testing.T) {
@@ -224,9 +294,16 @@ func TestUnrecoverableError(t *testing.T) {
 		},
 		Attempts(2),
 	)
-	assert.Error(t, err)
-	assert.Equal(t, Unrecoverable(testErr), err)
-	assert.Equal(t, 1, attempts, "unrecoverable error broke the loop")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	expectedErr := Unrecoverable(testErr)
+	if err.Error() != expectedErr.Error() {
+		t.Errorf("error: got %v, want %v", err, expectedErr)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts with unrecoverable error: got %d, want 1", attempts)
+	}
 }
 
 func TestCombineFixedDelays(t *testing.T) {
@@ -241,9 +318,15 @@ func TestCombineFixedDelays(t *testing.T) {
 		DelayType(CombineDelay(FixedDelay, FixedDelay)),
 	)
 	dur := time.Since(start)
-	assert.Error(t, err)
-	assert.Greater(t, dur, 400*time.Millisecond, "3 times combined, fixed retry is greater then 400ms")
-	assert.Less(t, dur, 500*time.Millisecond, "3 times combined, fixed retry is less then 500ms")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if dur <= 400*time.Millisecond {
+		t.Errorf("combined delay duration too short: got %v, want >400ms", dur)
+	}
+	if dur >= 500*time.Millisecond {
+		t.Errorf("combined delay duration too long: got %v, want <500ms", dur)
+	}
 }
 
 func TestRandomDelay(t *testing.T) {
@@ -259,9 +342,15 @@ func TestRandomDelay(t *testing.T) {
 		MaxJitter(50*time.Millisecond),
 	)
 	dur := time.Since(start)
-	assert.Error(t, err)
-	assert.Greater(t, dur, 2*time.Millisecond, "3 times random retry is longer then 2ms")
-	assert.Less(t, dur, 150*time.Millisecond, "3 times random retry is shorter then 150ms")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if dur <= 2*time.Millisecond {
+		t.Errorf("random delay duration too short: got %v, want >2ms", dur)
+	}
+	if dur >= 150*time.Millisecond {
+		t.Errorf("random delay duration too long: got %v, want <150ms", dur)
+	}
 }
 
 func TestMaxDelay(t *testing.T) {
@@ -277,9 +366,15 @@ func TestMaxDelay(t *testing.T) {
 		MaxDelay(50*time.Millisecond),
 	)
 	dur := time.Since(start)
-	assert.Error(t, err)
-	assert.Greater(t, dur, 120*time.Millisecond, "5 times with maximum delay retry is less than 120ms")
-	assert.Less(t, dur, 275*time.Millisecond, "5 times with maximum delay retry is longer than 275ms")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if dur <= 120*time.Millisecond {
+		t.Errorf("max delay duration too short: got %v, want >120ms (5 retries with max delay)", dur)
+	}
+	if dur >= 275*time.Millisecond {
+		t.Errorf("max delay duration too long: got %v, want <275ms (5 retries with max delay)", dur)
+	}
 }
 
 func TestBackOffDelay(t *testing.T) {
@@ -326,8 +421,12 @@ func TestBackOffDelay(t *testing.T) {
 					delay: c.delay,
 				}
 				delay := BackOffDelay(c.n, nil, &config)
-				assert.Equal(t, c.expectedMaxN, config.maxBackOffN, "max n mismatch")
-				assert.Equal(t, c.expectedDelay, delay, "delay duration mismatch")
+				if c.expectedMaxN != config.maxBackOffN {
+		t.Errorf("max n mismatch: got %v, want %v", config.maxBackOffN, c.expectedMaxN)
+	}
+				if c.expectedDelay != delay {
+		t.Errorf("delay duration mismatch: got %v, want %v", delay, c.expectedDelay)
+	}
 			},
 		)
 	}
@@ -381,7 +480,9 @@ func TestCombineDelay(t *testing.T) {
 					funcs[i] = f(d)
 				}
 				actual := CombineDelay(funcs...)(0, nil, nil)
-				assert.Equal(t, c.expected, actual, "delay duration mismatch")
+				if c.expected != actual {
+		t.Errorf("delay duration mismatch: got %v, want %v", actual, c.expected)
+	}
 			},
 		)
 	}
@@ -401,9 +502,15 @@ func TestContext(t *testing.T) {
 			Context(ctx),
 		)
 		dur := time.Since(start)
-		assert.Error(t, err)
-		assert.True(t, dur < defaultDelay, "immediately cancellation")
-		assert.Equal(t, 0, retrySum, "called at most once")
+		if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+		if !(dur < defaultDelay) {
+		t.Errorf("cancellation timing: got duration=%v, want <defaultDelay=%v", dur, defaultDelay)
+	}
+		if retrySum != 0 {
+		t.Errorf("retry count: got %d, want 0", retrySum)
+	}
 	})
 
 	t.Run("cancel in retry progress", func(t *testing.T) {
@@ -420,15 +527,27 @@ func TestContext(t *testing.T) {
 			}),
 			Context(ctx),
 		)
-		assert.Error(t, err)
+		if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 
 		expectedErrorFormat := `All attempts fail:
 #1: test
 #2: test
 #3: context canceled`
-		assert.Len(t, err, 3)
-		assert.Equal(t, expectedErrorFormat, err.Error(), "retry error format")
-		assert.Equal(t, 2, retrySum, "called at most once")
+		if retryErr, ok := err.(Error); ok {
+			if len(retryErr) != 3 {
+				t.Errorf("expected len=%d, got %d", 3, len(retryErr))
+			}
+		} else {
+			t.Fatalf("expected Error type, got %T", err)
+		}
+		if expectedErrorFormat != err.Error() {
+		t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
+	}
+		if retrySum != 2 {
+		t.Errorf("retry count: got %d, want 2", retrySum)
+	}
 	})
 
 	t.Run("cancel in retry progress - last error only", func(t *testing.T) {
@@ -446,9 +565,13 @@ func TestContext(t *testing.T) {
 			Context(ctx),
 			LastErrorOnly(true),
 		)
-		assert.Equal(t, context.Canceled, err)
+		if context.Canceled != err {
+		t.Errorf("error: got %v, want %v", err, context.Canceled)
+	}
 
-		assert.Equal(t, 2, retrySum, "called at most once")
+		if retrySum != 2 {
+		t.Errorf("retry count: got %d, want 2", retrySum)
+	}
 	})
 
 	t.Run("cancel in retry progress - infinite attempts", func(t *testing.T) {
@@ -470,9 +593,13 @@ func TestContext(t *testing.T) {
 				Attempts(0),
 			)
 
-			assert.Equal(t, context.Canceled, err)
+			if context.Canceled != err {
+		t.Errorf("error: got %v, want %v", err, context.Canceled)
+	}
 
-			assert.Equal(t, 2, retrySum, "called at most once")
+			if retrySum != 2 {
+		t.Errorf("retry count: got %d, want 2", retrySum)
+	}
 		}()
 	})
 
@@ -493,8 +620,12 @@ func TestContext(t *testing.T) {
 			Attempts(0),
 			WrapContextErrorWithLastError(true),
 		)
-		assert.ErrorIs(t, err, context.Canceled)
-		assert.ErrorIs(t, err, fooErr{str: "error 2"})
+		if !errors.Is(err, context.Canceled) {
+		t.Errorf("errors.Is(err, context.Canceled): got false, want true")
+	}
+		if !errors.Is(err, fooErr{str: "error 2"}) {
+		t.Errorf("errors.Is(err, last function error): got false, want true")
+	}
 	})
 
 	t.Run("timed out on retry infinte attempts - wraps context error with last retried function error", func(t *testing.T) {
@@ -511,8 +642,12 @@ func TestContext(t *testing.T) {
 			Attempts(0),
 			WrapContextErrorWithLastError(true),
 		)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
-		assert.ErrorIs(t, err, fooErr{str: "error 2"})
+		if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(err, context.DeadlineExceeded): got false, want true")
+	}
+		if !errors.Is(err, fooErr{str: "error 2"}) {
+		t.Errorf("errors.Is(err, last function error): got false, want true")
+	}
 	})
 }
 
@@ -535,7 +670,9 @@ func TestTimerInterface(t *testing.T) {
 		WithTimer(&timer),
 	)
 
-	assert.Error(t, err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
 
 }
 
@@ -546,9 +683,15 @@ func TestErrorIs(t *testing.T) {
 	e = append(e, expectErr)
 	e = append(e, closedErr)
 
-	assert.True(t, errors.Is(e, expectErr))
-	assert.True(t, errors.Is(e, closedErr))
-	assert.False(t, errors.Is(e, errors.New("error")))
+	if !errors.Is(e, expectErr) {
+		t.Error("IsRecoverable(err) = false, want true")
+	}
+	if !errors.Is(e, closedErr) {
+		t.Error("IsRecoverable(err) = false, want true")
+	}
+	if errors.Is(e, errors.New("error")) {
+		t.Error("IsRecoverable(err) = true, want false")
+	}
 }
 
 type fooErr struct{ str string }
@@ -571,9 +714,15 @@ func TestErrorAs(t *testing.T) {
 	var tf fooErr
 	var tb barErr
 
-	assert.True(t, errors.As(e, &tf))
-	assert.False(t, errors.As(e, &tb))
-	assert.Equal(t, "foo", tf.str)
+	if !errors.As(e, &tf) {
+		t.Error("IsRecoverable(err) = false, want true")
+	}
+	if errors.As(e, &tb) {
+		t.Error("IsRecoverable(err) = true, want false")
+	}
+	if "foo" != tf.str {
+		t.Errorf("fooErr.str: got %q, want %q", tf.str, "foo")
+	}
 }
 
 func TestUnwrap(t *testing.T) {
@@ -585,8 +734,12 @@ func TestUnwrap(t *testing.T) {
 		Attempts(1),
 	)
 
-	assert.Error(t, err)
-	assert.Equal(t, testError, errors.Unwrap(err))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if testError != errors.Unwrap(err) {
+		t.Errorf("unwrapped error: got %v, want %v", errors.Unwrap(err), testError)
+	}
 }
 
 func BenchmarkDo(b *testing.B) {
@@ -667,9 +820,15 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	
 	endTime := time.Now()
 	
-	assert.Error(t, err)
-	assert.Equal(t, uint64(2), count, "should attempt exactly 2 times")
-	assert.Len(t, timestamps, 2, "should have 2 timestamps")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if uint64(2) != count {
+		t.Errorf("attempt count: got %d, want 2", count)
+	}
+	if len(timestamps) != 2 {
+		t.Errorf("timestamp count: got %d, want 2", len(timestamps))
+	}
 	
 	// Verify timing: first attempt at ~0ms, second at ~200ms, end immediately after second attempt
 	firstAttemptTime := timestamps[0].Sub(startTime)
@@ -677,14 +836,22 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	totalTime := endTime.Sub(startTime)
 	
 	// First attempt should be immediate
-	assert.Less(t, firstAttemptTime, 50*time.Millisecond, "first attempt should be immediate")
+	if firstAttemptTime >= 50*time.Millisecond {
+		t.Errorf("first attempt timing: got %v, want <50ms (should be immediate)", firstAttemptTime)
+	}
 	
 	// Second attempt should be after delay
-	assert.Greater(t, secondAttemptTime, 150*time.Millisecond, "second attempt should be after delay")
-	assert.Less(t, secondAttemptTime, 250*time.Millisecond, "second attempt should not be too delayed")
+	if secondAttemptTime <= 150*time.Millisecond {
+		t.Errorf("second attempt timing: got %v, want >150ms (should be after 200ms delay)", secondAttemptTime)
+	}
+	if secondAttemptTime >= 250*time.Millisecond {
+		t.Errorf("second attempt timing: got %v, want <250ms", secondAttemptTime)
+	}
 	
 	// Total time should not include delay after final attempt
-	assert.Less(t, totalTime, 300*time.Millisecond, "should not delay after final attempt")
+	if totalTime >= 300*time.Millisecond {
+		t.Errorf("total duration: got %v, want <300ms (no delay after final attempt)", totalTime)
+	}
 }
 
 func TestOnRetryNotCalledOnLastAttempt(t *testing.T) {
@@ -703,21 +870,35 @@ func TestOnRetryNotCalledOnLastAttempt(t *testing.T) {
 		Delay(time.Nanosecond),
 	)
 	
-	assert.Error(t, err)
-	assert.Equal(t, 3, callCount, "function should be called 3 times")
-	assert.Equal(t, []uint{0, 1}, onRetryCalls, "onRetry should only be called for first 2 attempts, not the final one")
-	assert.Len(t, onRetryCalls, 2, "onRetry should be called exactly 2 times (not on last attempt)")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if callCount != 3 {
+		t.Errorf("function call count: got %d, want 3", callCount)
+	}
+	if !reflect.DeepEqual(onRetryCalls, []uint{0, 1}) {
+		t.Errorf("onRetry calls: got %v, want %v (should not be called on final attempt)", onRetryCalls, []uint{0, 1})
+	}
+	if len(onRetryCalls) != 2 {
+		t.Errorf("onRetry call count: got %d, want 2 (not called on last attempt)", len(onRetryCalls))
+	}
 }
 
 func TestIsRecoverable(t *testing.T) {
 	err := errors.New("err")
-	assert.True(t, IsRecoverable(err))
+	if !IsRecoverable(err) {
+		t.Error("IsRecoverable(err) = false, want true")
+	}
 
 	err = Unrecoverable(err)
-	assert.False(t, IsRecoverable(err))
+	if IsRecoverable(err) {
+		t.Error("IsRecoverable(err) = true, want false")
+	}
 
 	err = fmt.Errorf("wrapping: %w", err)
-	assert.False(t, IsRecoverable(err))
+	if IsRecoverable(err) {
+		t.Error("IsRecoverable(err) = true, want false")
+	}
 }
 
 func TestFullJitterBackoffDelay(t *testing.T) {
@@ -748,9 +929,12 @@ func TestFullJitterBackoffDelay(t *testing.T) {
 			expectedMaxCeiling = float64(maxDelay)
 		}
 
-		assert.True(t, delay >= 0, "Delay should be non-negative. Got: %v for attempt %d", delay, n)
-		assert.True(t, delay <= time.Duration(expectedMaxCeiling),
-			"Delay %v should be less than or equal to current backoff ceiling %v for attempt %d", delay, time.Duration(expectedMaxCeiling), n)
+		if delay < 0 {
+			t.Errorf("Delay should be non-negative. Got: %v for attempt %d", delay, n)
+		}
+		if delay > time.Duration(expectedMaxCeiling) {
+			t.Errorf("Delay %v should be less than or equal to current backoff ceiling %v for attempt %d", delay, time.Duration(expectedMaxCeiling), n)
+		}
 
 		t.Logf("Attempt %d: BaseDelay=%v, MaxDelay=%v, Calculated Ceiling=~%v, Actual Delay=%v",
 			n, baseDelay, maxDelay, time.Duration(expectedMaxCeiling), delay)
@@ -762,18 +946,25 @@ func TestFullJitterBackoffDelay(t *testing.T) {
 		if expectedCeilingNoMax > float64(10*time.Minute) { // Avoid overflow for very large N
 			expectedCeilingNoMax = float64(10 * time.Minute)
 		}
-		assert.True(t, delayNoMax >= 0, "Delay (no max) should be non-negative. Got: %v for attempt %d", delayNoMax, n)
-		assert.True(t, delayNoMax <= time.Duration(expectedCeilingNoMax),
-			"Delay (no max) %v should be less than or equal to current backoff ceiling %v for attempt %d", delayNoMax, time.Duration(expectedCeilingNoMax), n)
+		if delayNoMax < 0 {
+			t.Errorf("Delay (no max) should be non-negative. Got: %v for attempt %d", delayNoMax, n)
+		}
+		if delayNoMax > time.Duration(expectedCeilingNoMax) {
+			t.Errorf("Delay (no max) %v should be less than or equal to current backoff ceiling %v for attempt %d", delayNoMax, time.Duration(expectedCeilingNoMax), n)
+		}
 	}
 
 	// Test case where baseDelay might be zero
 	configZeroBase := &Config{delay: 0, maxDelay: maxDelay}
 	delayZeroBase := FullJitterBackoffDelay(0, errors.New("test error"), configZeroBase)
-	assert.Equal(t, time.Duration(0), delayZeroBase, "Delay with zero base delay should be 0")
+	if time.Duration(0) != delayZeroBase {
+		t.Errorf("delay with zero base: got %v, want 0", delayZeroBase)
+	}
 
 	delayZeroBaseAttempt1 := FullJitterBackoffDelay(1, errors.New("test error"), configZeroBase)
-	assert.Equal(t, time.Duration(0), delayZeroBaseAttempt1, "Delay with zero base delay (attempt > 0) should be 0")
+	if time.Duration(0) != delayZeroBaseAttempt1 {
+		t.Errorf("delay with zero base (attempt>0): got %v, want 0", delayZeroBaseAttempt1)
+	}
 
 	// Test with very small base delay
 	smallBaseDelay := 1 * time.Nanosecond
@@ -784,6 +975,8 @@ func TestFullJitterBackoffDelay(t *testing.T) {
 		if ceil > 100 {
 			ceil = 100
 		}
-		assert.True(t, d <= time.Duration(ceil))
+		if d > time.Duration(ceil) {
+			t.Errorf("delay ceiling: got %v, want <=%v", d, time.Duration(ceil))
+		}
 	}
 }

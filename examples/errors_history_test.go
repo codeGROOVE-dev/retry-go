@@ -6,9 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/codeGROOVE-dev/retry-go"
-	"github.com/stretchr/testify/assert"
-)
+	"github.com/codeGROOVE-dev/retry-go")
 
 // TestErrorHistory shows an example of how to get all the previous errors when
 // retry.Do ends in success
@@ -40,6 +38,10 @@ func TestErrorHistory(t *testing.T) {
 			allErrors = append(allErrors, err)
 		}),
 	)
-	assert.NoError(t, err)
-	assert.Len(t, allErrors, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(allErrors) != 3 {
+		t.Errorf("expected len(allErrors) = 3, got %d", len(allErrors))
+	}
 }
