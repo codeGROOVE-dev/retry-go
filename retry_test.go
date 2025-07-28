@@ -140,6 +140,7 @@ func TestRetryIf_ZeroAttempts(t *testing.T) {
 			return err.Error() != "special"
 		}),
 		Delay(time.Nanosecond),
+		LastErrorOnly(true),
 		Attempts(0),
 	)
 	if err == nil {
@@ -286,7 +287,6 @@ func TestLastErrorOnly(t *testing.T) {
 func TestUnrecoverableError(t *testing.T) {
 	attempts := 0
 	testErr := errors.New("error")
-	expectedErr := Error{testErr}
 	err := Do(
 		func() error {
 			attempts++
@@ -294,15 +294,9 @@ func TestUnrecoverableError(t *testing.T) {
 		},
 		Attempts(2),
 	)
-	if err.Error() != expectedErr.Error() {
-		t.Errorf("got %v, want %v", err, expectedErr)
-	}
-	if testErr != errors.Unwrap(err) {
-		t.Errorf("unwrapped error: got %v, want %v", errors.Unwrap(err), testErr)
-	}
-	if attempts != 1 {
-		t.Errorf("attempts with unrecoverable error: got %d, want 1", attempts)
-	}
+	assert.Error(t, err)
+	assert.Equal(t, Unrecoverable(testErr), err)
+	assert.Equal(t, 1, attempts, "unrecoverable error broke the loop")
 }
 
 func TestCombineFixedDelays(t *testing.T) {
@@ -587,6 +581,7 @@ func TestContext(t *testing.T) {
 						cancel()
 					}
 				}),
+				LastErrorOnly(true),
 				Context(ctx),
 				Attempts(0),
 			)
