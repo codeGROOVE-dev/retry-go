@@ -180,14 +180,21 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		}
 		attempt++
 
-		// Wait for next attempt
-		delayDuration := delay(config, attempt, err)
+		// Wait for next attempt - inline delay calculation for performance
+		delayTime := config.delayType(attempt, err, config)
+		if delayTime < 0 {
+			delayTime = 0
+		}
+		if config.maxDelay > 0 && delayTime > config.maxDelay {
+			delayTime = config.maxDelay
+		}
+		
 		select {
-		case <-config.timer.After(delayDuration):
+		case <-config.timer.After(delayTime):
 		case <-config.context.Done():
 			contextErr := context.Cause(config.context)
 			if config.lastErrorOnly {
-				if config.wrapContextErrorWithLastError && err != nil {
+				if config.wrapLastErr && err != nil {
 					return emptyT, fmt.Errorf("%w: %w", contextErr, err)
 				}
 				return emptyT, contextErr
@@ -228,14 +235,25 @@ type Error []error
 // Error returns a string representation of all errors that occurred during retry attempts.
 // Each error is prefixed with its attempt number.
 func (e Error) Error() string {
-	logWithNumber := make([]string, len(e))
+	if len(e) == 0 {
+		return "All attempts fail:"
+	}
+	
+	// Use strings.Builder for efficient string concatenation
+	var b strings.Builder
+	b.WriteString("All attempts fail:")
+	
 	for i, err := range e {
 		if err != nil {
-			logWithNumber[i] = fmt.Sprintf("#%d: %s", i+1, err.Error())
+			b.WriteByte('\n')
+			b.WriteByte('#')
+			b.WriteString(fmt.Sprint(i + 1))
+			b.WriteString(": ")
+			b.WriteString(err.Error())
 		}
 	}
-
-	return fmt.Sprintf("All attempts fail:\n%s", strings.Join(logWithNumber, "\n"))
+	
+	return b.String()
 }
 
 // Is reports whether any error in e matches target.
@@ -315,30 +333,14 @@ func IsRecoverable(err error) bool {
 // Is implements error matching for unrecoverableError.
 // It supports errors.Is by checking if the target is also an unrecoverableError.
 func (unrecoverableError) Is(err error) bool {
-	_, isUnrecoverable := err.(unrecoverableError)
-	return isUnrecoverable
+	_, ok := err.(unrecoverableError)
+	return ok
 }
 
 func unpackUnrecoverable(err error) error {
-	if unrecoverable, isUnrecoverable := err.(unrecoverableError); isUnrecoverable {
-		return unrecoverable.error
+	if u, ok := err.(unrecoverableError); ok {
+		return u.error
 	}
-
 	return err
 }
 
-func delay(config *Config, attempt uint, err error) time.Duration {
-	delayTime := config.delayType(attempt, err, config)
-	
-	// Ensure delay is non-negative
-	if delayTime < 0 {
-		delayTime = 0
-	}
-	
-	// Apply max delay cap if configured
-	if config.maxDelay > 0 && delayTime > config.maxDelay {
-		delayTime = config.maxDelay
-	}
-
-	return delayTime
-}

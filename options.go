@@ -20,12 +20,19 @@ type OnRetryFunc func(attempt uint, err error)
 // The attempt parameter is the zero-based index of the attempt.
 type DelayTypeFunc func(attempt uint, err error, config *Config) time.Duration
 
-// Timer represents the timer used to track time for a retry.
+// Timer provides an interface for time operations in retry logic.
+// This abstraction allows for mocking time in tests and implementing
+// custom timing behaviors. The standard implementation uses time.After.
 type Timer interface {
+	// After returns a channel that sends the current time after the duration elapses.
+	// It should behave like time.After.
 	After(time.Duration) <-chan time.Time
 }
 
-// Config contains all retry configuration.
+// Config holds all configuration options for retry behavior.
+// It is typically populated using Option functions and should not be
+// constructed directly. Use the various Option functions like Attempts,
+// Delay, and RetryIf to configure retry behavior.
 type Config struct {
 	attempts                      uint
 	attemptsForError              map[error]uint
@@ -36,9 +43,9 @@ type Config struct {
 	retryIf                       RetryIfFunc
 	delayType                     DelayTypeFunc
 	lastErrorOnly                 bool
-	context                       context.Context
-	timer                         Timer
-	wrapContextErrorWithLastError bool
+	context     context.Context
+	timer       Timer
+	wrapLastErr bool // wrap context error with last function error
 
 	maxBackOffN uint
 }
@@ -58,10 +65,10 @@ func (c *Config) validate() error {
 	
 	// Ensure we have required functions
 	if c.retryIf == nil {
-		return fmt.Errorf("retryIf function cannot be nil")
+		return fmt.Errorf("retry if function cannot be nil")
 	}
 	if c.delayType == nil {
-		return fmt.Errorf("delayType function cannot be nil")
+		return fmt.Errorf("delay type function cannot be nil")
 	}
 	if c.timer == nil {
 		return fmt.Errorf("timer cannot be nil")
@@ -73,7 +80,9 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// Option represents an option for retry.
+// Option configures retry behavior. Options are applied in the order provided
+// to Do or DoWithData. Later options override earlier ones if they modify the
+// same configuration field.
 type Option func(*Config)
 
 func emptyOption(c *Config) {}
@@ -380,8 +389,8 @@ func WithTimer(t Timer) Option {
 //		retry.Attempts(0),
 //		retry.WrapContextErrorWithLastError(true),
 //	)
-func WrapContextErrorWithLastError(wrapContextErrorWithLastError bool) Option {
+func WrapContextErrorWithLastError(wrap bool) Option {
 	return func(c *Config) {
-		c.wrapContextErrorWithLastError = wrapContextErrorWithLastError
+		c.wrapLastErr = wrap
 	}
 }
