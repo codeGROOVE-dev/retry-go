@@ -34,7 +34,6 @@ func TestGet(t *testing.T) {
 			return err
 		},
 	)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

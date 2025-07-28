@@ -660,7 +660,6 @@ func TestTimerInterface(t *testing.T) {
 		MaxDelay(50*time.Millisecond),
 		WithTimer(timer),
 	)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -996,7 +995,6 @@ func TestConcurrentRetryUsage(t *testing.T) {
 				Attempts(5),
 				Delay(0), // No delay for speed
 			)
-
 			if err != nil {
 				t.Errorf("goroutine %d: unexpected error: %v", id, err)
 			}
@@ -1207,7 +1205,6 @@ func TestCustomTimerEdgeCases(t *testing.T) {
 			WithTimer(timer),
 			Attempts(5),
 		)
-
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
