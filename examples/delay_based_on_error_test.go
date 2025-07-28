@@ -68,11 +68,10 @@ func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 				return e.retryAfter
 			}
 
-			//default is backoffdelay
+			// default is backoffdelay
 			return retry.BackOffDelay(n, err, config)
 		}),
 	)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
