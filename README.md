@@ -1,9 +1,9 @@
-# retry-go: Production Retry Logic for Go
+# retry: Production Retry Logic for Go
 
-[![Release](https://img.shields.io/github/release/codeGROOVE-dev/retry-go.svg?style=flat-square)](https://github.com/codeGROOVE-dev/retry-go/releases/latest)
+[![Release](https://img.shields.io/github/release/codeGROOVE-dev/retry.svg?style=flat-square)](https://github.com/codeGROOVE-dev/retry/releases/latest)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
-[![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/retry-go?style=flat-square)](https://goreportcard.com/report/github.com/codeGROOVE-dev/retry-go)
-[![Go Reference](https://pkg.go.dev/badge/github.com/codeGROOVE-dev/retry-go.svg)](https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/retry?style=flat-square)](https://goreportcard.com/report/github.com/codeGROOVE-dev/retry)
+[![Go Reference](https://pkg.go.dev/badge/github.com/codeGROOVE-dev/retry.svg)](https://pkg.go.dev/github.com/codeGROOVE-dev/retry)
 
 **Zero dependencies. Memory-bounded. No goroutine leaks. No panics.**
 
@@ -102,14 +102,14 @@ retry.AttemptsForError(5, ErrServiceUnavailable) // More retries for 503s
 Requires Go 1.22 or higher.
 
 ```bash
-go get github.com/codeGROOVE-dev/retry-go
+go get github.com/codeGROOVE-dev/retry
 ```
 
 ## Documentation
 
-- [API Docs](https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go)
-- [Examples](https://github.com/codeGROOVE-dev/retry-go/tree/master/examples)
-- [Tests](https://github.com/codeGROOVE-dev/retry-go/tree/master/retry_test.go)
+- [API Docs](https://pkg.go.dev/github.com/codeGROOVE-dev/retry)
+- [Examples](https://github.com/codeGROOVE-dev/retry/tree/master/examples)
+- [Tests](https://github.com/codeGROOVE-dev/retry/tree/master/retry_test.go)
 
 ---
 
