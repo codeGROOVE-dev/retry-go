@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/codeGROOVE-dev/retry-go"
+	"github.com/codeGROOVE-dev/retry"
 )
 
 func TestGet(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/codeGROOVE-dev/retry-go"
+	"github.com/codeGROOVE-dev/retry"
 )
 
 // TestErrorHistory shows an example of how to get all the previous errors when
