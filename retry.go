@@ -239,7 +239,10 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 	}
 
 	if config.lastErrorOnly {
-		return emptyT, errorLog.Unwrap()
+		if len(errorLog) > 0 {
+			return emptyT, errorLog.Unwrap()
+		}
+		return emptyT, nil
 	}
 	return emptyT, errorLog
 }
@@ -256,7 +259,10 @@ func (e Error) Error() string {
 		return "retry: all attempts failed"
 	}
 
+	// Pre-size builder for better performance
+	// Estimate: prefix (30) + each error (~50 chars avg)
 	var b strings.Builder
+	b.Grow(30 + len(e)*50)
 	b.WriteString("retry: all attempts failed:")
 
 	for i, err := range e {

@@ -740,7 +740,7 @@ func TestUnwrap(t *testing.T) {
 func BenchmarkDo(b *testing.B) {
 	testError := errors.New("test error")
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = Do(
 			func() error {
 				return testError
@@ -754,7 +754,7 @@ func BenchmarkDo(b *testing.B) {
 func BenchmarkDoWithData(b *testing.B) {
 	testError := errors.New("test error")
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = DoWithData(
 			func() (int, error) {
 				return 0, testError
@@ -766,7 +766,7 @@ func BenchmarkDoWithData(b *testing.B) {
 }
 
 func BenchmarkDoNoErrors(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = Do(
 			func() error {
 				return nil
@@ -778,7 +778,7 @@ func BenchmarkDoNoErrors(b *testing.B) {
 }
 
 func BenchmarkDoWithDataNoErrors(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = DoWithData(
 			func() (int, error) {
 				return 0, nil
@@ -980,7 +980,7 @@ func TestConcurrentRetryUsage(t *testing.T) {
 	var wg sync.WaitGroup
 	goroutines := 20 // Reduced from 100 for faster tests
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -1318,7 +1318,7 @@ func TestRetryWithNilContext(t *testing.T) {
 	}
 }
 
-// Update testTimer to support custom behavior
+// Update testTimer to support custom behavior.
 type testTimer struct {
 	afterFunc func(time.Duration) <-chan time.Time
 	called    bool
@@ -1400,7 +1400,7 @@ func TestFullJitterBackoffDelay(t *testing.T) {
 	// Test with very small base delay
 	smallBaseDelay := 1 * time.Nanosecond
 	configSmallBase := &Config{delay: smallBaseDelay, maxDelay: 100 * time.Nanosecond}
-	for i := uint(0); i < 5; i++ {
+	for i := range uint(5) {
 		d := FullJitterBackoffDelay(i, errors.New("test"), configSmallBase)
 		ceil := float64(smallBaseDelay) * math.Pow(2, float64(i))
 		if ceil > 100 {

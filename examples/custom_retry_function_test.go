@@ -13,20 +13,20 @@ import (
 	"github.com/codeGROOVE-dev/retry-go"
 )
 
-// RetriableError is a custom error that contains a positive duration for the next retry
+// RetriableError is a custom error that contains a positive duration for the next retry.
 type RetriableError struct {
 	Err        error
 	RetryAfter time.Duration
 }
 
-// Error returns error message and a Retry-After duration
+// Error returns error message and a Retry-After duration.
 func (e *RetriableError) Error() string {
 	return fmt.Sprintf("%s (retry after %v)", e.Err.Error(), e.RetryAfter)
 }
 
 var _ error = (*RetriableError)(nil)
 
-// TestCustomRetryFunction shows how to use a custom retry function
+// TestCustomRetryFunction shows how to use a custom retry function.
 func TestCustomRetryFunction(t *testing.T) {
 	attempts := 5 // server succeeds after 5 attempts
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +90,6 @@ func TestCustomRetryFunction(t *testing.T) {
 			return retry.BackOffDelay(n, err, config)
 		}),
 	)
-
 	// Server responds with: <body content>
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

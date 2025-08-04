@@ -62,9 +62,8 @@ func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
 			var retryAfterErr RetryAfterError
 			if errors.As(err, &retryAfterErr) {
-				if t, err := parseRetryAfter(retryAfterErr.response.Header.Get("Retry-After")); err == nil {
-					return time.Until(t)
-				}
+				t := parseRetryAfter(retryAfterErr.response.Header.Get("Retry-After"))
+				return time.Until(t)
 			}
 			var someOtherErr SomeOtherError
 			if errors.As(err, &someOtherErr) {
@@ -83,7 +82,7 @@ func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 	}
 }
 
-// use https://github.com/aereal/go-httpretryafter instead
-func parseRetryAfter(_ string) (time.Time, error) {
-	return time.Now().Add(1 * time.Second), nil //nolint:unparam // error is always nil for test simplicity
+// use https://github.com/aereal/go-httpretryafter instead.
+func parseRetryAfter(_ string) time.Time {
+	return time.Now().Add(1 * time.Second)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // TestErrorHistory shows an example of how to get all the previous errors when
-// retry.Do ends in success
+// retry.Do ends in success.
 func TestErrorHistory(t *testing.T) {
 	attempts := 3 // server succeeds after 3 attempts
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

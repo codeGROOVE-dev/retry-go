@@ -2,11 +2,10 @@ package retry //nolint:revive // More than 5 public structs are necessary for AP
 
 import (
 	"context"
-	cryptorand "crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"time"
 )
 
@@ -217,29 +216,7 @@ func RandomDelay(_ uint, _ error, config *Config) time.Duration {
 	if config.maxJitter <= 0 {
 		return 0
 	}
-	return time.Duration(secureRandomInt63n(int64(config.maxJitter)))
-}
-
-// secureRandomInt63n returns a non-negative pseudo-random number in [0,n) using crypto/rand.
-func secureRandomInt63n(n int64) int64 {
-	if n <= 0 {
-		return 0
-	}
-	var b [8]byte
-	for {
-		if _, err := cryptorand.Read(b[:]); err != nil {
-			// Fall back to 0 on error rather than panic
-			return 0
-		}
-		// Clear sign bit to ensure non-negative
-		val := int64(binary.BigEndian.Uint64(b[:]) & 0x7FFFFFFFFFFFFFFF) //nolint:gosec // Bitwise AND to clear sign bit is safe
-		// Rejection sampling to avoid modulo bias
-		const maxInt63 = 0x7FFFFFFFFFFFFFFF // max int63
-		maxVal := int64(maxInt63)
-		if val < maxVal-(maxVal%n) {
-			return val % n
-		}
-	}
+	return time.Duration(rand.Int64N(int64(config.maxJitter))) //nolint:gosec // Cryptographic randomness not needed for retry jitter
 }
 
 // CombineDelay creates a DelayTypeFunc that sums the delays from multiple strategies.
@@ -293,7 +270,7 @@ func FullJitterBackoffDelay(attempt uint, _ error, config *Config) time.Duration
 	if ceiling <= 0 {
 		return 0
 	}
-	return time.Duration(secureRandomInt63n(int64(ceiling)))
+	return time.Duration(rand.Int64N(int64(ceiling))) //nolint:gosec // Cryptographic randomness not needed for retry jitter
 }
 
 // OnRetry sets a callback function that is called after each failed attempt.

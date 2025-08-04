@@ -5,129 +5,101 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/retry-go?style=flat-square)](https://goreportcard.com/report/github.com/codeGROOVE-dev/retry-go)
 [![Go Reference](https://pkg.go.dev/badge/github.com/codeGROOVE-dev/retry-go.svg)](https://pkg.go.dev/github.com/codeGROOVE-dev/retry-go)
 
-**Zero dependencies. Memory-bounded. Uptime-focused.**
+**Zero dependencies. Memory-bounded. No goroutine leaks. No panics.**
 
-*Because 99.99% uptime means your retry logic can't be the failure point.*
+*Hard guarantees: Bounded memory (1000 errors max). No allocations in hot path. Context-aware cancellation.*
 
 Actively maintained fork of [avast/retry-go](https://github.com/avast/retry-go) focused on correctness and resource efficiency. 100% API compatible drop-in replacement.
 
-**Key improvements:**
-- ⚡ Zero external dependencies
-- 🔒 Memory-bounded error accumulation  
-- 🛡️ Integer overflow protection in backoff
-- 🎯 Enhanced readability and debuggability
-- 📊 Predictable behavior under load
+**Production guarantees:**
+- Memory bounded: Max 1000 errors stored (configurable via maxErrors constant)
+- No goroutine leaks: Uses caller's goroutine exclusively
+- Integer overflow safe: Backoff capped at 2^62 to prevent wraparound
+- Context-aware: Cancellation checked before each attempt
+- No panics: All edge cases return errors
+- Predictable jitter: Uses math/rand/v2 for consistent performance
+- Zero allocations after init in success path
 
 ## Quick Start
 
-### Basic Retry with Error Handling
+### Simple Retry
 
 ```go
-import (
-    "net/http"
-    "github.com/codeGROOVE-dev/retry-go"
-)
+// Retry a flaky operation up to 10 times (default)
+err := retry.Do(func() error {
+    return doSomethingFlaky()
+})
+```
 
-// Retry API call with exponential backoff + jitter
+### Retry with Custom Attempts
+
+```go
+// Retry up to 5 times with exponential backoff
 err := retry.Do(
     func() error {
-        resp, err := http.Get("https://api.stripe.com/v1/charges")
+        resp, err := http.Get("https://api.example.com/data")
         if err != nil {
             return err
         }
         defer resp.Body.Close()
-        
-        if resp.StatusCode >= 500 {
-            return fmt.Errorf("server error: %d", resp.StatusCode)
-        }
         return nil
     },
     retry.Attempts(5),
-    retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
 )
 ```
 
-### Retry with Data Return (Generics)
+### Overly-complicated production configuration
 
 ```go
-import (
-    "context"
-    "encoding/json"
-    "github.com/codeGROOVE-dev/retry-go"
-)
 
-// Database query with timeout and retry
-users, err := retry.DoWithData(
-    func() ([]User, error) {
-        return db.FindActiveUsers(ctx)
-    },
-    retry.Attempts(3),
-    retry.Context(ctx),
-    retry.DelayType(retry.BackOffDelay),
-)
-```
-
-### Production Configuration
-
-```go
-// Payment processing with comprehensive retry logic
+// Overly-complex production pattern: bounded retries with circuit breaking
 err := retry.Do(
-    func() error { return paymentGateway.Charge(ctx, amount) },
-    retry.Attempts(5),
-    retry.Context(ctx),
-    retry.DelayType(retry.FullJitterBackoffDelay),
-    retry.MaxDelay(30*time.Second),
+    func() error {
+        return processPayment(ctx, req)
+    },
+    retry.Attempts(3),                        // Hard limit
+    retry.Context(ctx),                       // Respect cancellation
+    retry.MaxDelay(10*time.Second),           // Cap backoff
+    retry.AttemptsForError(0, ErrRateLimit),  // Stop on rate limit
     retry.OnRetry(func(n uint, err error) {
-        log.Warn("Payment retry", "attempt", n+1, "error", err)
+        log.Printf("retry attempt %d: %v", n, err)
     }),
     retry.RetryIf(func(err error) bool {
-        return !isAuthError(err) // Don't retry 4xx errors
+        // Only retry on network errors
+        var netErr net.Error
+        return errors.As(err, &netErr) && netErr.Temporary()
     }),
 )
 ```
 
-## Key Features
+### Preventing Cascading Failures
 
-**Unrecoverable Errors** - Stop immediately for certain errors:
 ```go
-if resp.StatusCode == 401 {
-    return retry.Unrecoverable(errors.New("auth failed"))
+// Stop retry storms with Unrecoverable
+if errors.Is(err, context.DeadlineExceeded) {
+    return retry.Unrecoverable(err) // Don't retry timeouts
 }
+
+// Per-error type limits prevent thundering herd
+retry.AttemptsForError(0, ErrCircuitOpen)    // Fail fast on circuit breaker
+retry.AttemptsForError(1, sql.ErrTxDone)     // One retry for tx errors
+retry.AttemptsForError(5, ErrServiceUnavailable) // More retries for 503s
 ```
 
-**Context Integration** - Timeout and cancellation:
-```go
-ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-retry.Do(dbQuery, retry.Context(ctx))
-```
+## Failure Modes & Limits
 
-**Error-Specific Limits** - Different retry counts per error type:
-```go
-retry.AttemptsForError(1, sql.ErrTxDone)  // Don't retry transaction errors
-```
-
-## Performance & Scale
-
-| Metric | Value |
-|--------|-------|
-| Memory overhead | ~200 bytes per operation |
-| Error accumulation | Bounded at 1000 errors (DoS protection) |
-| Goroutines | Uses calling goroutine only |
-| High-throughput safe | No hidden allocations or locks |
-
-## Library Comparison
-
-**[cenkalti/backoff](https://github.com/cenkalti/backoff)** - Complex interface, requires manual retry loops, no error accumulation.
-
-**[sethgrid/pester](https://github.com/sethgrid/pester)** - HTTP-only, lacks general-purpose retry logic.
-
-**[matryer/try](https://github.com/matryer/try)** - Popular but non-standard API, missing production features.
-
-**[rafaeljesus/retry-go](https://github.com/rafaeljesus/retry-go)** - Similar design but lacks error-specific limits and comprehensive context handling.
-
-**This fork** builds on avast/retry-go's solid foundation with correctness fixes and resource optimizations.
+| Scenario | Behavior | Limit |
+|----------|----------|-------|
+| Error accumulation | Old errors dropped after limit | 1000 errors |
+| Attempt overflow | Stops retrying | uint max (~4B) |
+| Backoff overflow | Capped at max duration | 2^62 ns |
+| Context cancelled | Returns immediately | No retries |
+| Timer returns nil | Returns error | Fail safe |
+| Panic in retryable func | Propagates panic | No swallowing |
 
 ## Installation
+
+Requires Go 1.22 or higher.
 
 ```bash
 go get github.com/codeGROOVE-dev/retry-go
