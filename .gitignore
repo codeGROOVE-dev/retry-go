@@ -19,3 +19,6 @@ Gopkg.lock
 
 # cover
 coverage.txt
+
+# added by lint-install
+out/

@@ -81,17 +81,25 @@ func Do(retryableFunc RetryableFunc, opts ...Option) error {
 //
 // By default, it will retry up to 10 times with exponential backoff and jitter.
 // The behavior can be customized using Option functions.
+//
+//nolint:gocognit,gocyclo,revive // Complexity is necessary for retry logic
 func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (T, error) {
 	var attempt uint
 	var emptyT T
 
+	const (
+		defaultAttempts = 10
+		defaultDelay    = 100 * time.Millisecond
+		defaultJitter   = 100 * time.Millisecond
+	)
+
 	// default config
 	config := &Config{
-		attempts:         10,
+		attempts:         defaultAttempts,
 		attemptsForError: make(map[error]uint),
-		delay:            100 * time.Millisecond,
-		maxJitter:        100 * time.Millisecond,
-		onRetry:          func(n uint, err error) {},
+		delay:            defaultDelay,
+		maxJitter:        defaultJitter,
+		onRetry:          func(_ uint, _ error) {},
 		retryIf:          IsRecoverable,
 		delayType:        CombineDelay(BackOffDelay, RandomDelay),
 		lastErrorOnly:    false,
@@ -148,7 +156,8 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		// Only append if we haven't hit the cap to prevent unbounded growth.
 		if len(errorLog) < cap(errorLog) {
 			// Unpack unrecoverable errors to store the underlying error.
-			if u, ok := err.(unrecoverableError); ok {
+			var u unrecoverableError
+			if errors.As(err, &u) {
 				errorLog = append(errorLog, u.error)
 			} else {
 				errorLog = append(errorLog, err)
@@ -209,7 +218,7 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		// Protect against timer implementations that might return nil channel.
 		timer := config.timer.After(delay)
 		if timer == nil {
-			return emptyT, fmt.Errorf("retry: timer.After returned nil channel")
+			return emptyT, errors.New("retry: timer.After returned nil channel")
 		}
 
 		select {
@@ -217,7 +226,7 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 		case <-config.context.Done():
 			contextErr := context.Cause(config.context)
 			if config.lastErrorOnly {
-				if config.wrapLastErr && err != nil {
+				if config.wrapLastErr {
 					return emptyT, fmt.Errorf("%w: %w", contextErr, err)
 				}
 				return emptyT, contextErr
@@ -230,7 +239,10 @@ func DoWithData[T any](retryableFunc RetryableFuncWithData[T], opts ...Option) (
 	}
 
 	if config.lastErrorOnly {
-		return emptyT, errorLog.Unwrap()
+		if len(errorLog) > 0 {
+			return emptyT, errorLog.Unwrap()
+		}
+		return emptyT, nil
 	}
 	return emptyT, errorLog
 }
@@ -247,7 +259,10 @@ func (e Error) Error() string {
 		return "retry: all attempts failed"
 	}
 
+	// Pre-size builder for better performance
+	// Estimate: prefix (30) + each error (~50 chars avg)
 	var b strings.Builder
+	b.Grow(30 + len(e)*50)
 	b.WriteString("retry: all attempts failed:")
 
 	for i, err := range e {
@@ -273,7 +288,7 @@ func (e Error) Is(target error) bool {
 // As finds the first error in e that matches target, and if so,
 // sets target to that error value and returns true.
 // It implements support for errors.As.
-func (e Error) As(target interface{}) bool {
+func (e Error) As(target any) bool {
 	for _, err := range e {
 		if errors.As(err, target) {
 			return true

@@ -1,16 +1,21 @@
-package retry
+package retry //nolint:revive // More than 5 public structs are necessary for API flexibility
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
-// RetryIfFunc is the signature for functions that determine whether to retry after an error.
+// IfFunc is the signature for functions that determine whether to retry after an error.
 // It returns true if the error is retryable, false otherwise.
-type RetryIfFunc func(error) bool
+type IfFunc func(error) bool
+
+// RetryIfFunc is an alias for IfFunc for backwards compatibility.
+// Deprecated: Use IfFunc instead.
+type RetryIfFunc = IfFunc //nolint:revive // Keeping RetryIfFunc name for backwards compatibility
 
 // OnRetryFunc is the signature for functions called after each retry attempt.
 // The attempt parameter is the zero-based index of the attempt.
@@ -37,18 +42,20 @@ type Timer interface {
 // It is typically populated using Option functions and should not be
 // constructed directly. Use the various Option functions like Attempts,
 // Delay, and RetryIf to configure retry behavior.
+//
+//nolint:govet // Field alignment optimization would break API compatibility
 type Config struct {
-	attempts         uint
 	attemptsForError map[error]uint
+	context          context.Context //nolint:containedctx // Required for backwards compatibility - context is part of the public API
 	delay            time.Duration
 	maxDelay         time.Duration
 	maxJitter        time.Duration
 	onRetry          OnRetryFunc
-	retryIf          RetryIfFunc
+	retryIf          IfFunc
 	delayType        DelayTypeFunc
-	lastErrorOnly    bool
-	context          context.Context
 	timer            Timer
+	attempts         uint
+	lastErrorOnly    bool
 	wrapLastErr      bool // wrap context error with last function error
 }
 
@@ -67,16 +74,16 @@ func (c *Config) validate() error {
 
 	// Ensure we have required functions.
 	if c.retryIf == nil {
-		return fmt.Errorf("retry: retryIf function cannot be nil")
+		return errors.New("retry: retryIf function cannot be nil")
 	}
 	if c.delayType == nil {
-		return fmt.Errorf("retry: delayType function cannot be nil")
+		return errors.New("retry: delayType function cannot be nil")
 	}
 	if c.timer == nil {
-		return fmt.Errorf("retry: timer cannot be nil")
+		return errors.New("retry: timer cannot be nil")
 	}
 	if c.context == nil {
-		return fmt.Errorf("retry: context cannot be nil")
+		return errors.New("retry: context cannot be nil")
 	}
 
 	// Ensure map is initialized.
@@ -167,6 +174,8 @@ func DelayType(delayType DelayTypeFunc) Option {
 	}
 }
 
+const maxShiftAttempts = 62 // Maximum bit shift to prevent overflow
+
 // BackOffDelay implements exponential backoff delay strategy.
 // Each retry attempt doubles the delay, up to a maximum.
 func BackOffDelay(attempt uint, _ error, config *Config) time.Duration {
@@ -176,8 +185,8 @@ func BackOffDelay(attempt uint, _ error, config *Config) time.Duration {
 	}
 
 	// Cap attempt to prevent overflow.
-	if attempt > 62 {
-		attempt = 62
+	if attempt > maxShiftAttempts {
+		attempt = maxShiftAttempts
 	}
 
 	// Simple exponential backoff.
@@ -203,11 +212,11 @@ func FixedDelay(_ uint, _ error, config *Config) time.Duration {
 // RandomDelay implements a random delay strategy.
 // Returns a random duration between 0 and config.maxJitter.
 func RandomDelay(_ uint, _ error, config *Config) time.Duration {
-	// Ensure maxJitter is positive to avoid panic in rand.Int63n.
+	// Ensure maxJitter is positive to avoid panic.
 	if config.maxJitter <= 0 {
 		return 0
 	}
-	return time.Duration(rand.Int63n(int64(config.maxJitter)))
+	return time.Duration(rand.Int64N(int64(config.maxJitter))) //nolint:gosec // Cryptographic randomness not needed for retry jitter
 }
 
 // CombineDelay creates a DelayTypeFunc that sums the delays from multiple strategies.
@@ -232,7 +241,7 @@ func CombineDelay(delays ...DelayTypeFunc) DelayTypeFunc {
 
 // FullJitterBackoffDelay implements exponential backoff with full jitter.
 // It returns a random delay between 0 and min(maxDelay, baseDelay * 2^attempt).
-func FullJitterBackoffDelay(attempt uint, err error, config *Config) time.Duration {
+func FullJitterBackoffDelay(attempt uint, _ error, config *Config) time.Duration {
 	// Handle zero/negative base delay.
 	base := config.delay
 	if base <= 0 {
@@ -240,8 +249,8 @@ func FullJitterBackoffDelay(attempt uint, err error, config *Config) time.Durati
 	}
 
 	// Cap attempt to prevent overflow.
-	if attempt > 62 {
-		attempt = 62
+	if attempt > maxShiftAttempts {
+		attempt = maxShiftAttempts
 	}
 
 	// Calculate ceiling with overflow check.
@@ -261,7 +270,7 @@ func FullJitterBackoffDelay(attempt uint, err error, config *Config) time.Durati
 	if ceiling <= 0 {
 		return 0
 	}
-	return time.Duration(rand.Int63n(int64(ceiling))) // #nosec G404 - math/rand is acceptable for jitter.
+	return time.Duration(rand.Int64N(int64(ceiling))) //nolint:gosec // Cryptographic randomness not needed for retry jitter
 }
 
 // OnRetry sets a callback function that is called after each failed attempt.
@@ -310,7 +319,7 @@ func OnRetry(onRetry OnRetryFunc) Option {
 //			return retry.Unrecoverable(errors.New("special error"))
 //		}
 //	)
-func RetryIf(retryIf RetryIfFunc) Option {
+func RetryIf(retryIf IfFunc) Option { //nolint:revive // Keeping RetryIf name for backwards compatibility
 	return func(c *Config) {
 		if retryIf != nil {
 			c.retryIf = retryIf
@@ -335,7 +344,7 @@ func RetryIf(retryIf RetryIfFunc) Option {
 //	)
 func Context(ctx context.Context) Option {
 	return func(c *Config) {
-		c.context = ctx
+		c.context = ctx //nolint:fatcontext // Required for backwards compatibility - users expect to set context via option
 	}
 }
 
