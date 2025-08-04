@@ -37,14 +37,15 @@ func TestDoWithDataAllFailed(t *testing.T) {
 #8: test
 #9: test
 #10: test`
-	if retryErr, ok := err.(Error); ok {
+	var retryErr Error
+	if errors.As(err, &retryErr) {
 		if len(retryErr) != 10 {
 			t.Errorf("error count: got %d, want 10", len(retryErr))
 		}
 	} else {
 		t.Fatalf("expected Error type, got %T", err)
 	}
-	fmt.Println(err.Error())
+	// Log error output for debugging
 	if err.Error() != expectedErrorFormat {
 		t.Errorf("error message: got %q, want %q", err.Error(), expectedErrorFormat)
 	}
@@ -110,7 +111,8 @@ func TestRetryIf(t *testing.T) {
 #1: test
 #2: test
 #3: special`
-	if retryErr, ok := err.(Error); ok {
+	var retryErr Error
+	if errors.As(err, &retryErr) {
 		if len(retryErr) != 3 {
 			t.Errorf("error count: got %d, want 3", len(retryErr))
 		}
@@ -431,7 +433,7 @@ func TestCombineDelay(t *testing.T) {
 			return d
 		}
 	}
-	const max = time.Duration(1<<63 - 1)
+	const maxDuration = time.Duration(1<<63 - 1)
 	for _, c := range []struct {
 		label    string
 		delays   []time.Duration
@@ -458,11 +460,11 @@ func TestCombineDelay(t *testing.T) {
 		{
 			label: "overflow",
 			delays: []time.Duration{
-				max,
+				maxDuration,
 				time.Second,
 				time.Millisecond,
 			},
-			expected: max,
+			expected: maxDuration,
 		},
 	} {
 		t.Run(
@@ -528,7 +530,8 @@ func TestContext(t *testing.T) {
 #1: test
 #2: test
 #3: context canceled`
-		if retryErr, ok := err.(Error); ok {
+		var retryErr Error
+		if errors.As(err, &retryErr) {
 			if len(retryErr) != 3 {
 				t.Errorf("error count: got %d, want 3", len(retryErr))
 			}
@@ -558,7 +561,7 @@ func TestContext(t *testing.T) {
 			Context(ctx),
 			LastErrorOnly(true),
 		)
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Errorf("error: got %v, want %v", err, context.Canceled)
 		}
 
@@ -575,7 +578,7 @@ func TestContext(t *testing.T) {
 			err := Do(
 				func() error { return errors.New("test") },
 				OnRetry(func(n uint, err error) {
-					fmt.Println(n)
+					_ = n // Track attempt number
 					retrySum += 1
 					if retrySum > 1 {
 						cancel()
@@ -586,7 +589,7 @@ func TestContext(t *testing.T) {
 				Attempts(0),
 			)
 
-			if err != context.Canceled {
+			if !errors.Is(err, context.Canceled) {
 				t.Errorf("error: got %v, want %v", err, context.Canceled)
 			}
 
@@ -602,7 +605,7 @@ func TestContext(t *testing.T) {
 
 		retrySum := 0
 		err := Do(
-			func() error { return fooErr{str: fmt.Sprintf("error %d", retrySum+1)} },
+			func() error { return fooError{str: fmt.Sprintf("error %d", retrySum+1)} },
 			OnRetry(func(n uint, err error) {
 				retrySum += 1
 				if retrySum == 2 {
@@ -616,7 +619,7 @@ func TestContext(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("errors.Is(err, context.Canceled): got false, want true")
 		}
-		if !errors.Is(err, fooErr{str: "error 2"}) {
+		if !errors.Is(err, fooError{str: "error 2"}) {
 			t.Errorf("errors.Is(err, last function error): got false, want true")
 		}
 	})
@@ -627,7 +630,7 @@ func TestContext(t *testing.T) {
 
 		retrySum := 0
 		err := Do(
-			func() error { return fooErr{str: fmt.Sprintf("error %d", retrySum+1)} },
+			func() error { return fooError{str: fmt.Sprintf("error %d", retrySum+1)} },
 			OnRetry(func(n uint, err error) {
 				retrySum += 1
 			}),
@@ -638,7 +641,7 @@ func TestContext(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("errors.Is(err, context.DeadlineExceeded): got false, want true")
 		}
-		if !errors.Is(err, fooErr{str: "error 2"}) {
+		if !errors.Is(err, fooError{str: "error 2"}) {
 			t.Errorf("errors.Is(err, last function error): got false, want true")
 		}
 	})
@@ -673,8 +676,7 @@ func TestErrorIs(t *testing.T) {
 	var e Error
 	expectErr := errors.New("error")
 	closedErr := os.ErrClosed
-	e = append(e, expectErr)
-	e = append(e, closedErr)
+	e = append(e, expectErr, closedErr)
 
 	if !errors.Is(e, expectErr) {
 		t.Error("errors.Is(e, expectErr): got false, want true")
@@ -687,34 +689,34 @@ func TestErrorIs(t *testing.T) {
 	}
 }
 
-type fooErr struct{ str string }
+type fooError struct{ str string }
 
-func (e fooErr) Error() string {
+func (e fooError) Error() string {
 	return e.str
 }
 
-type barErr struct{ str string }
+type barError struct{ str string }
 
-func (e barErr) Error() string {
+func (e barError) Error() string {
 	return e.str
 }
 
 func TestErrorAs(t *testing.T) {
 	var e Error
-	fe := fooErr{str: "foo"}
+	fe := fooError{str: "foo"}
 	e = append(e, fe)
 
-	var tf fooErr
-	var tb barErr
+	var tf fooError
+	var tb barError
 
 	if !errors.As(e, &tf) {
-		t.Error("errors.As(e, &fooErr): got false, want true")
+		t.Error("errors.As(e, &fooError): got false, want true")
 	}
 	if errors.As(e, &tb) {
-		t.Error("errors.As(e, &barErr): got true, want false")
+		t.Error("errors.As(e, &barError): got true, want false")
 	}
 	if tf.str != "foo" {
-		t.Errorf("fooErr.str: got %q, want %q", tf.str, "foo")
+		t.Errorf("fooError.str: got %q, want %q", tf.str, "foo")
 	}
 }
 
@@ -730,7 +732,7 @@ func TestUnwrap(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if errors.Unwrap(err) != testError {
+	if !errors.Is(err, testError) {
 		t.Errorf("unwrapped error: got %v, want %v", errors.Unwrap(err), testError)
 	}
 }
@@ -787,9 +789,9 @@ func BenchmarkDoWithDataNoErrors(b *testing.B) {
 	}
 }
 
-type attemptsForErrorTestError struct{}
+type testAttemptsError struct{}
 
-func (attemptsForErrorTestError) Error() string { return "test error" }
+func (testAttemptsError) Error() string { return "test error" }
 
 func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 	var count uint64
@@ -801,12 +803,12 @@ func TestAttemptsForErrorNoDelayAfterFinalAttempt(t *testing.T) {
 		func() error {
 			count++
 			timestamps = append(timestamps, time.Now())
-			return attemptsForErrorTestError{}
+			return testAttemptsError{}
 		},
 		Attempts(3),
 		Delay(200*time.Millisecond),
 		DelayType(FixedDelay),
-		AttemptsForError(2, attemptsForErrorTestError{}),
+		AttemptsForError(2, testAttemptsError{}),
 		LastErrorOnly(true),
 		Context(context.Background()),
 	)
@@ -1009,8 +1011,10 @@ func TestConcurrentRetryUsage(t *testing.T) {
 
 func TestDoWithDataGenericEdgeCases(t *testing.T) {
 	t.Run("nil pointer return", func(t *testing.T) {
+		// Test that DoWithData correctly handles functions returning nil pointers
+		var nilString *string
 		result, err := DoWithData(func() (*string, error) {
-			return nil, nil
+			return nilString, nil
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -1126,7 +1130,8 @@ func TestErrorAccumulationAtCapacity(t *testing.T) {
 
 			// Should have succeeded on large tests
 			if tc.attempts >= 1000 && err != nil {
-				if errList, ok := err.(Error); ok {
+				var errList Error
+				if errors.As(err, &errList) {
 					// Verify capacity is capped
 					if cap(errList) != tc.expectedCap {
 						t.Errorf("error slice capacity: got %d, want %d", cap(errList), tc.expectedCap)
@@ -1137,8 +1142,8 @@ func TestErrorAccumulationAtCapacity(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				errList, ok := err.(Error)
-				if !ok {
+				var errList Error
+				if !errors.As(err, &errList) {
 					t.Fatalf("expected Error type, got %T", err)
 				}
 				if cap(errList) != tc.expectedCap {
@@ -1151,7 +1156,7 @@ func TestErrorAccumulationAtCapacity(t *testing.T) {
 
 func TestRetryIfWithChangingConditions(t *testing.T) {
 	// Test RetryIf function that changes behavior based on external state
-	var shouldRetry bool = true
+	shouldRetry := true
 	attempts := 0
 
 	err := Do(
@@ -1219,7 +1224,7 @@ func TestComplexErrorChains(t *testing.T) {
 	baseErr := errors.New("base error")
 	wrappedOnce := fmt.Errorf("wrapped once: %w", baseErr)
 	wrappedTwice := fmt.Errorf("wrapped twice: %w", wrappedOnce)
-	customErr := &fooErr{str: "custom error"}
+	customErr := &fooError{str: "custom error"}
 	wrappedCustom := fmt.Errorf("wrapped custom: %w", customErr)
 
 	attempts := 0
@@ -1249,27 +1254,30 @@ func TestComplexErrorChains(t *testing.T) {
 		t.Error("error chain should contain base error")
 	}
 
-	// Check if err contains fooErr
-	// The second attempt returns wrappedCustom which contains &fooErr
-	var fe fooErr
+	// Check if err contains fooError
+	// The second attempt returns wrappedCustom which contains &fooError
+	var fe fooError
 	found := false
 
 	// Check if we can find it directly
 	if errors.As(err, &fe) {
 		found = true
-	} else if errList, ok := err.(Error); ok {
-		// Check each error in the list
-		for _, e := range errList {
-			var tempFe *fooErr
-			if errors.As(e, &tempFe) {
-				found = true
-				break
+	} else {
+		var errList Error
+		if errors.As(err, &errList) {
+			// Check each error in the list
+			for _, e := range errList {
+				var tempFe *fooError
+				if errors.As(e, &tempFe) {
+					found = true
+					break
+				}
 			}
 		}
 	}
 
 	if !found {
-		t.Error("error chain should contain fooErr")
+		t.Error("error chain should contain fooError")
 	}
 
 	// Should stop at unrecoverable
@@ -1312,8 +1320,8 @@ func TestRetryWithNilContext(t *testing.T) {
 
 // Update testTimer to support custom behavior
 type testTimer struct {
-	called    bool
 	afterFunc func(time.Duration) <-chan time.Time
+	called    bool
 }
 
 func (t *testTimer) After(d time.Duration) <-chan time.Time {

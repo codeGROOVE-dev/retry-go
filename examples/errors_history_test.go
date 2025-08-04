@@ -29,8 +29,8 @@ func TestErrorHistory(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
-			if resp.StatusCode != 200 {
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusOK {
 				return fmt.Errorf("failed HTTP - %d", resp.StatusCode)
 			}
 			return nil

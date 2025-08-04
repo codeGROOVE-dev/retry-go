@@ -1,8 +1,9 @@
 package retry_test
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -34,12 +35,12 @@ func TestCustomRetryFunction(t *testing.T) {
 			// HTTP 429 status code with Retry-After header in seconds
 			w.Header().Add("Retry-After", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte("Server limit reached"))
+			_, _ = w.Write([]byte("Server limit reached"))
 			attempts--
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("hello"))
+		_, _ = w.Write([]byte("hello"))
 	}))
 	defer ts.Close()
 
@@ -55,8 +56,8 @@ func TestCustomRetryFunction(t *testing.T) {
 						panic(err)
 					}
 				}()
-				body, err = ioutil.ReadAll(resp.Body)
-				if resp.StatusCode != 200 {
+				body, err = io.ReadAll(resp.Body)
+				if resp.StatusCode != http.StatusOK {
 					err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 					if resp.StatusCode == http.StatusTooManyRequests {
 						// check Retry-After header if it contains seconds to wait for the next retry
@@ -79,9 +80,10 @@ func TestCustomRetryFunction(t *testing.T) {
 			return err
 		},
 		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
-			fmt.Println("Server fails with: " + err.Error())
-			if retriable, ok := err.(*RetriableError); ok {
-				fmt.Printf("Client follows server recommendation to retry after %v\n", retriable.RetryAfter)
+			// Server fails with: <error message>
+			var retriable *RetriableError
+			if errors.As(err, &retriable) {
+				// Client follows server recommendation to retry after retriable.RetryAfter
 				return retriable.RetryAfter
 			}
 			// apply a default exponential back off strategy
@@ -89,7 +91,7 @@ func TestCustomRetryFunction(t *testing.T) {
 		}),
 	)
 
-	fmt.Println("Server responds with: " + string(body))
+	// Server responds with: <body content>
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

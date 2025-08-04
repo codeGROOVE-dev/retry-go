@@ -3,8 +3,9 @@
 package retry_test
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,7 +38,7 @@ func (err SomeOtherError) Error() string {
 
 func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "hello")
+		_, _ = fmt.Fprintln(w, "hello")
 	}))
 	defer ts.Close()
 
@@ -53,19 +54,21 @@ func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 						panic(err)
 					}
 				}()
-				body, err = ioutil.ReadAll(resp.Body)
+				body, err = io.ReadAll(resp.Body)
 			}
 
 			return err
 		},
 		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
-			switch e := err.(type) {
-			case RetryAfterError:
-				if t, err := parseRetryAfter(e.response.Header.Get("Retry-After")); err == nil {
+			var retryAfterErr RetryAfterError
+			if errors.As(err, &retryAfterErr) {
+				if t, err := parseRetryAfter(retryAfterErr.response.Header.Get("Retry-After")); err == nil {
 					return time.Until(t)
 				}
-			case SomeOtherError:
-				return e.retryAfter
+			}
+			var someOtherErr SomeOtherError
+			if errors.As(err, &someOtherErr) {
+				return someOtherErr.retryAfter
 			}
 
 			// default is backoffdelay
@@ -82,5 +85,5 @@ func TestCustomRetryFunctionBasedOnKindOfError(t *testing.T) {
 
 // use https://github.com/aereal/go-httpretryafter instead
 func parseRetryAfter(_ string) (time.Time, error) {
-	return time.Now().Add(1 * time.Second), nil
+	return time.Now().Add(1 * time.Second), nil //nolint:unparam // error is always nil for test simplicity
 }
