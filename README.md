@@ -102,7 +102,7 @@ retry.AttemptsForError(5, ErrServiceUnavailable) // More retries for 503s
 Requires Go 1.22 or higher.
 
 ```bash
-go get github.com/codeGROOVE-dev/retry-go
+go get github.com/codeGROOVE-dev/retry
 ```
 
 ## Documentation
