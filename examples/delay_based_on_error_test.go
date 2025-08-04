@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeGROOVE-dev/retry-go"
+	"github.com/codeGROOVE-dev/retry"
 )
 
 type RetryAfterError struct {
